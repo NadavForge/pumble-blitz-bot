@@ -184,18 +184,18 @@ def slack_events():
 
     return "ok", 200
 
+import traceback
+
 @app.route("/sheet-test")
 def sheet_test():
     try:
-        from google_sheet import get_leaderboard_for_channel
-
-        # Use a fake channel for testing
-        test_text = get_leaderboard_for_channel("test-channel")
-
-        return f"<pre>{test_text}</pre>", 200
-
+        from google_sheet import _get_sheet
+        ws = _get_sheet()
+        return "SUCCESS: Connected to Google Sheets!"
     except Exception as e:
-        return f"<pre>ERROR:\n{e}</pre>", 500
+        tb = traceback.format_exc()
+        print("SHEET TEST ERROR:", tb)   # prints full error to Render logs
+        return "<pre>ERROR:\n" + tb + "</pre>"
 
 @app.route("/test-creds")
 def test_creds():
