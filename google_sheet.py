@@ -182,6 +182,61 @@ def get_master_leaderboard(period: str = "today") -> str:
     return "\n".join(lines)
 
 # -----------------------------
+# Last Week helpers (for weekly auto-post)
+# -----------------------------
+def get_last_week_date_range():
+    """
+    Returns (start, end) datetime for last week (Monday 00:00 to Sunday 23:59 PST)
+    """
+    now = datetime.now(PST)
+    
+    # Find this week's Monday
+    days_since_monday = now.weekday()
+    this_monday = now - timedelta(days=days_since_monday)
+    this_monday = this_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Last week is 7 days before
+    last_monday = this_monday - timedelta(days=7)
+    last_sunday = this_monday - timedelta(seconds=1)  # 23:59:59 Sunday
+    
+    return last_monday, last_sunday
+
+def get_master_leaderboard_last_week() -> str:
+    """
+    Get master leaderboard for the previous week (Monday-Sunday)
+    """
+    rows = _load_all_deals()
+    
+    last_monday, last_sunday = get_last_week_date_range()
+    
+    # Filter to last week only
+    filtered = []
+    for row in rows:
+        ts_str = row.get("timestamp", "")
+        row_time = parse_timestamp(ts_str)
+        if last_monday <= row_time <= last_sunday:
+            filtered.append(row)
+    
+    totals = defaultdict(int)
+    for row in filtered:
+        user = row.get("user_name") or "Unknown"
+        deals = int(row.get("deals") or 0)
+        totals[user] += deals
+
+    if not totals:
+        return ""
+
+    sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+
+    lines = []
+    rank = 1
+    for user, deals in sorted_rows:
+        lines.append(f"{rank}. {user} — {deals}")
+        rank += 1
+
+    return "\n".join(lines)
+
+# -----------------------------
 # Monthly Archive & Reset
 # -----------------------------
 def archive_and_reset_monthly() -> str:
