@@ -4,6 +4,7 @@ __pycache__/
 
 # Credentials (we’ll temporarily override this)
 credentials.json
+*.json
 
 # Environment
 .env
