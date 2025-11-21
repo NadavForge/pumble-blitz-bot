@@ -1,7 +1,9 @@
 import os
 from collections import defaultdict
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2 import service_account
+
+
 
 # -----------------------------
 # Google Sheet Config
