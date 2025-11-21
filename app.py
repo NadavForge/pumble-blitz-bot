@@ -117,6 +117,7 @@ def slack_events_get():
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
     data = request.get_json()
+    print("Incoming Slack Event:", data)
 
     # Slack challenge verification
     if "challenge" in data:
