@@ -25,6 +25,10 @@ def send_message(channel, text):
 # ----------------------------------------
 # Event handler (Slack → your bot)
 # ----------------------------------------
+@app.route("/slack/events", methods=["GET"])
+def slack_events_get():
+    return "OK", 200
+
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
     data = request.json
