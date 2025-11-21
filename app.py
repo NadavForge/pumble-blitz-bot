@@ -1,222 +1,149 @@
-from flask import Flask, request, jsonify
-import requests
-import json
 import os
-import re
-from datetime import datetime, timezone
-
+import json
+from flask import Flask, request, make_response
+from datetime import datetime
 from google_sheet import append_deal, get_leaderboard_for_channel, get_master_leaderboard
 
-# Tokens from environment variables (Render)
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
-
-if not SLACK_BOT_TOKEN:
-    raise ValueError("SLACK_BOT_TOKEN is missing in environment variables")
-
-# -----------------------------
-# Flask app
-# -----------------------------
 app = Flask(__name__)
 
-# -----------------------------
-# Cache for user & channel lookups
-# -----------------------------
-USER_CACHE = {}
-CHANNEL_CACHE = {}
+# -------------------------------------------------
+# Helper: extract number of Gs from message text
+# -------------------------------------------------
+def parse_deal_count(text: str) -> int:
+    """
+    Detect messages like:
+    - '1g'
+    - '2G'
+    - '1 gig'
+    - '2gig too easy'
+    - '1 g'
+    """
+    text = text.lower().replace(" ", "")
+    if "gig" in text:
+        for n in ["1", "2", "3", "4", "5"]:
+            if f"{n}gig" in text:
+                return int(n)
 
-# -----------------------------
-# Helper to call Slack API
-# -----------------------------
-def slack_api(method, params=None, http_method="POST"):
-    url = f"https://slack.com/api/{method}"
-    headers = {
-        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-        "Content-Type": "application/json; charset=utf-8",
-    }
+    if "g" in text:
+        for n in ["1", "2", "3", "4", "5"]:
+            if f"{n}g" in text:
+                return int(n)
 
-    if http_method == "GET":
-        resp = requests.get(url, headers=headers, params=params or {})
-    else:
-        resp = requests.post(url, headers=headers, json=params or {})
-
-    return resp.json()
+    return 0
 
 
+# -------------------------------------------------
+# Helper: get Slack username
+# -------------------------------------------------
 def get_user_name(user_id):
-    if user_id in USER_CACHE:
-        return USER_CACHE[user_id]
+    """Return fallback to ID for now (optional: expand using Slack API)."""
+    return user_id
 
-    data = slack_api("users.info", {"user": user_id})
-    if data.get("ok"):
-        profile = data["user"].get("profile", {})
-        name = profile.get("display_name") or profile.get("real_name") or user_id
-    else:
-        name = user_id
 
-    USER_CACHE[user_id] = name
-    return name
+# -------------------------------------------------
+# Slack Event Endpoint
+# -------------------------------------------------
+@app.route("/slack/events", methods=["POST"])
+def slack_events():
+    data = request.json
 
-def get_channel_name(channel_id):
-    if channel_id in CHANNEL_CACHE:
-        return CHANNEL_CACHE[channel_id]
+    # Challenge handshake (Slack verification)
+    if "challenge" in data:
+        return make_response(data["challenge"], 200)
 
-    data = slack_api("conversations.info", {"channel": channel_id}, http_method="GET")
+    if data.get("type") != "event_callback":
+        return make_response("", 200)
 
-    if data.get("ok"):
-        name = data["channel"].get("name") or channel_id
-    else:
-        name = channel_id
+    event = data.get("event", {})
+    event_type = event.get("type")
 
-    CHANNEL_CACHE[channel_id] = name
-    return name
+    # Only handle messages
+    if event_type != "message" or "text" not in event:
+        return make_response("", 200)
 
-# -----------------------------
-# Helper: send message back into Slack
-# -----------------------------
+    text = event.get("text", "")
+    channel = event.get("channel", "")
+    user = event.get("user", "")
+    timestamp = datetime.utcnow().isoformat()
+
+    # -------------------------------------------------
+    # COMMAND: leaderboards
+    # -------------------------------------------------
+    if text.lower() == "leaderboard":
+        leaderboard = get_leaderboard_for_channel(channel)
+        if leaderboard:
+            send_message(channel, leaderboard)
+        else:
+            send_message(channel, f"No deals logged yet for {channel}.")
+        return make_response("", 200)
+
+    if text.lower() == "master leaderboard":
+        leaderboard = get_master_leaderboard()
+        if leaderboard:
+            send_message(channel, leaderboard)
+        else:
+            send_message(channel, "No deals logged yet.")
+        return make_response("", 200)
+
+    # -------------------------------------------------
+    # DEAL DETECTION
+    # -------------------------------------------------
+    deals = parse_deal_count(text)
+    if deals > 0:
+        user_name = get_user_name(user)
+        append_deal(user_name, channel, deals, timestamp)
+        return make_response("", 200)
+
+    return make_response("", 200)
+
+
+# -------------------------------------------------
+# Send message back to Slack
+# -------------------------------------------------
+import requests
+
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
+
 def send_message(channel, text):
+    """Post a message to Slack."""
     url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
     payload = {
         "channel": channel,
-        "text": text,
+        "text": text
     }
-    requests.post(url, headers=headers, json=payload)
+    requests.post(url, headers=headers, data=json.dumps(payload))
 
-# -----------------------------
-# Deal detection pattern
-# -----------------------------
-DEAL_PATTERN = re.compile(r"\b([1-9])\s*(g|gb|gig)s?\b", re.IGNORECASE)
 
-def extract_deal_count(text):
-    """
-    Returns int number of deals if text contains deal-style message:
-    1g, 2g, 1gb, 1gig, 2G im ramping, etc.
-    Otherwise returns 0.
-    """
-    if not text:
-        return 0
-
-    match = DEAL_PATTERN.search(text)
-    if not match:
-        return 0
-
-    try:
-        return int(match.group(1))
-    except:
-        return 0
-
-# -----------------------------
-# ROUTING
-# -----------------------------
+# -------------------------------------------------
+# Test routes
+# -------------------------------------------------
 @app.route("/")
 def home():
-    return "Slack Bot Running"
+    return "ForgeBot is running!"
 
-# Slack sometimes GET checks the route
-@app.route("/slack/events", methods=["GET"])
-def slack_events_get():
-    return "OK", 200
-
-@app.route("/slack/events", methods=["POST"])
-def slack_events():
-    data = request.get_json()
-    print("Incoming Slack Event:", data)
-
-    # Slack challenge verification
-    if "challenge" in data:
-        return jsonify({"challenge": data["challenge"]})
-
-    # Process events
-    if "event" in data:
-        event = data["event"]
-
-        # Ignore bot messages
-        if event.get("subtype") == "bot_message":
-            return "ok", 200
-
-        # Only respond to real messages
-        if event.get("type") != "message":
-            return "ok", 200
-
-        user_id = event.get("user")
-        text = event.get("text") or ""
-        channel_id = event.get("channel")
-
-        # Convert IDs into readable names
-        channel_name = get_channel_name(channel_id)
-
-        # -----------------------------
-        # AUTO-DETECT DEAL CHANNELS (must end with "-deals")
-        # -----------------------------
-        is_deal_channel = channel_name.lower().endswith("-deals")
-
-        # -----------------------------
-        # 1) DEAL DETECTION LOGIC
-        # -----------------------------
-        deal_count = extract_deal_count(text)
-
-        if deal_count > 0 and is_deal_channel and user_id:
-            user_name = get_user_name(user_id)
-            timestamp = datetime.now(timezone.utc).isoformat()
-
-            # Log deal to Google Sheets
-            append_deal(
-                user_name=user_name,
-                channel_name=channel_name,
-                deals=deal_count,
-                timestamp=timestamp
-            )
-
-            # Optional confirmation message:
-            # send_message(channel_id, f"Logged {deal_count}g for *{user_name}*")
-
-        # -----------------------------
-        # 2) LEADERBOARD COMMANDS
-        # -----------------------------
-        lower = text.lower().strip()
-
-        # Channel-only leaderboard
-        if lower == "leaderboard":
-            leaderboard_text = get_leaderboard_for_channel(channel_name)
-            send_message(channel_id, leaderboard_text or f"No deals logged yet for {channel_name}.")
-        
-        # Master leaderboard (all blitzes)
-        elif lower == "master leaderboard":
-            leaderboard_text = get_master_leaderboard()
-            send_message(channel_id, leaderboard_text or "No deals logged yet.")
-
-    return "ok", 200
-
-import traceback
+@app.route("/test-creds")
+def test_creds():
+    try:
+        path = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+        with open(path, "r") as f:
+            data = f.read()
+        return f"Loaded secret file successfully! Length: {len(data)}"
+    except Exception as e:
+        return f"ERROR:\n{e}"
 
 @app.route("/sheet-test")
 def sheet_test():
     try:
-        from google_sheet import _get_sheet
-        ws = _get_sheet()
-        return "SUCCESS: Connected to Google Sheets!"
+        # Quick sheet ping
+        append_deal("TEST_USER", "test-channel", 1, datetime.utcnow().isoformat())
+        return "Sheet write OK!"
     except Exception as e:
-        tb = traceback.format_exc()
-        print("SHEET TEST ERROR:", tb)   # prints full error to Render logs
-        return "<pre>ERROR:\n" + tb + "</pre>"
+        return f"ERROR:\n{e}"
 
-@app.route("/test-creds")
-def test_creds():
-    import os
-    path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if not path:
-        return "No env var found"
-
-    try:
-        with open(path, "r") as f:
-            data = f.read()
-        return "Loaded secret file successfully! Length: " + str(len(data))
-    except Exception as e:
-        return "ERROR: " + str(e)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=10000)
