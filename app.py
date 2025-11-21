@@ -250,5 +250,45 @@ def bot_id_check():
     """Debug route to verify bot user ID was fetched"""
     return f"Bot User ID: {SLACK_BOT_USER_ID or 'NOT SET'}"
 
+# -----------------------------
+# Daily Leaderboard Auto-Post
+# -----------------------------
+DAILY_POST_SECRET = os.environ.get("DAILY_POST_SECRET", "")
+LEADERBOARD_CHANNEL_ID = os.environ.get("LEADERBOARD_CHANNEL_ID", "")
+
+@app.route("/daily-leaderboard", methods=["GET", "POST"])
+def daily_leaderboard():
+    """
+    Endpoint for external cron job to trigger daily master leaderboard post.
+    Call with ?secret=YOUR_SECRET for security.
+    """
+    # Security check
+    provided_secret = request.args.get("secret", "")
+    if not DAILY_POST_SECRET or provided_secret != DAILY_POST_SECRET:
+        print("Warning: daily-leaderboard called with invalid or missing secret")
+        return "Unauthorized", 401
+    
+    if not LEADERBOARD_CHANNEL_ID:
+        print("Error: LEADERBOARD_CHANNEL_ID not set")
+        return "LEADERBOARD_CHANNEL_ID not configured", 500
+    
+    # Generate and post master leaderboard
+    leaderboard_text = get_master_leaderboard()
+    if not leaderboard_text:
+        leaderboard_text = "No deals logged yet."
+    
+    # Add header for daily post
+    from datetime import datetime
+    today = datetime.now().strftime("%B %d, %Y")
+    message = f"📊 *Daily Summary — {today}*\n\n{leaderboard_text}"
+    
+    slack_api_post("chat.postMessage", {
+        "channel": LEADERBOARD_CHANNEL_ID,
+        "text": message
+    })
+    
+    print(f"Daily leaderboard posted to {LEADERBOARD_CHANNEL_ID}")
+    return "OK", 200
+
 if __name__ == "__main__":
     app.run(debug=True)
