@@ -1,133 +1,98 @@
-import os
-import re
-import json
 from flask import Flask, request, jsonify
 import requests
+import re
+from datetime import datetime
 from google_sheet import append_deal, get_leaderboard_for_channel, get_master_leaderboard
 
 app = Flask(__name__)
 
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
+SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID")  # <-- Add your bot user ID in Render
+VERIFY_TOKEN = os.environ.get("SLACK_VERIFY_TOKEN")
 
-# ------------------------------------------------------------------------------
-# Helper: Send message to Slack
-# ------------------------------------------------------------------------------
+
+# ---------------------------------------------------------
+# Send message back to Slack
+# ---------------------------------------------------------
 def slack_send(channel, text):
     url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json"
     }
-    payload = {"channel": channel, "text": text}
-    requests.post(url, headers=headers, json=payload)
+    requests.post(url, headers=headers, json={"channel": channel, "text": text})
 
-# ------------------------------------------------------------------------------
-# Helper: Get display name
-# ------------------------------------------------------------------------------
-def get_display_name(user_id: str) -> str:
-    url = "https://slack.com/api/users.info"
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-    r = requests.get(url, headers=headers, params={"user": user_id})
-    data = r.json()
 
-    if not data.get("ok"):
-        return user_id  # fallback
+# ---------------------------------------------------------
+# Parse if message contains a deal (1g, 2g, 1GB, 2gig, etc.)
+# ---------------------------------------------------------
+DEAL_REGEX = re.compile(r"\b[12]\s*(g|gb|gig)\b", re.IGNORECASE)
 
-    profile = data["user"]["profile"]
-    return profile.get("display_name") or profile.get("real_name") or user_id
+def message_has_deal(text: str) -> bool:
+    return bool(DEAL_REGEX.search(text))
 
-# ------------------------------------------------------------------------------
-# Deal detection: match ANY of these:
-# "1g" "2g" "1G" "2G" "1gb" "2gb" "1gig" "2gig" "1GB" "2GB"
-# ------------------------------------------------------------------------------
-DEAL_REGEX = re.compile(r"\b([1-9])\s*(g|gb|gig)\b", re.IGNORECASE)
 
-def detect_deals(text: str) -> int:
-    match = DEAL_REGEX.search(text.lower())
-    if not match:
-        return 0
-    return int(match.group(1))
-
-# ------------------------------------------------------------------------------
-# Only track deals in channels matching: blitz-<market>-deals
-# ------------------------------------------------------------------------------
-def is_deal_channel(name: str) -> bool:
-    name = name.lower()
-    return name.startswith("blitz-") and name.endswith("-deals")
-
-# ------------------------------------------------------------------------------
-# Slack Event Handler
-# ------------------------------------------------------------------------------
+# ---------------------------------------------------------
+# Route – Slack sends events here
+# ---------------------------------------------------------
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
     data = request.json
 
-    # URL Verification
+    # --- URL Verification ---
     if "challenge" in data:
         return jsonify({"challenge": data["challenge"]})
 
-    if "event" not in data:
-        return "OK"
-
-    event = data["event"]
-
-    # Ignore bot messages
-    if event.get("subtype") == "bot_message":
-        return "OK"
+    event = data.get("event", {})
+    if not event:
+        return "no event", 200
 
     user = event.get("user")
     text = event.get("text", "")
     channel = event.get("channel")
+    subtype = event.get("subtype")
 
-    # Get channel name
-    channel_info = requests.get(
-        "https://slack.com/api/conversations.info",
-        headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
-        params={"channel": channel}
-    ).json()
+    # ---------------------------------------------------------
+    # 1. IGNORE BOT MESSAGES (fixes endless loop)
+    # ---------------------------------------------------------
+    if subtype == "bot_message":
+        return "ignored bot message", 200
 
-    channel_name = channel_info["channel"]["name"]
+    if user == SLACK_BOT_USER_ID:
+        return "ignored my own message", 200
 
-    # --------------------------
-    # COMMAND: leaderboard
-    # --------------------------
-    if "leaderboard" in text.lower():
-        board = get_leaderboard_for_channel(channel_name)
+    # ---------------------------------------------------------
+    # 2. Handle deal logs (ANY valid G pattern = +1 deal)
+    # ---------------------------------------------------------
+    if message_has_deal(text):
+        ts = datetime.utcnow().isoformat()
+        append_deal(user_name=user, channel_name=channel, deals=1, timestamp=ts)
+
+    # ---------------------------------------------------------
+    # 3. Leaderboard command
+    # ---------------------------------------------------------
+    if text.lower().strip() == "leaderboard":
+        board = get_leaderboard_for_channel(channel)
         if not board:
-            slack_send(channel, f"No deals logged yet for {channel_name}.")
-        else:
-            slack_send(channel, board)
-        return "OK"
+            board = f"No deals logged yet for <#{channel}>."
+        slack_send(channel, board)
 
-    # --------------------------
-    # COMMAND: master leaderboard
-    # --------------------------
-    if "master leaderboard" in text.lower():
+    # ---------------------------------------------------------
+    # 4. Master leaderboard command
+    # ---------------------------------------------------------
+    if text.lower().strip() == "master leaderboard":
         board = get_master_leaderboard()
         if not board:
-            slack_send(channel, "No deals logged yet across all markets.")
-        else:
-            slack_send(channel, board)
-        return "OK"
+            board = "No deals logged yet across all markets."
+        slack_send(channel, board)
 
-    # --------------------------
-    # DEAL DETECTION
-    # --------------------------
-    if is_deal_channel(channel_name):
-        deals = detect_deals(text)
-        if deals > 0:
-            display_name = get_display_name(user)
-            timestamp = event.get("ts")
+    return "ok", 200
 
-            append_deal(display_name, channel_name, deals, timestamp)
 
-    return "OK"
-
-# ------------------------------------------------------------------------------
-# Test endpoint – DO NOT DELETE
-# ------------------------------------------------------------------------------
 @app.route("/")
 def home():
-    return "ForgeBot Running"
+    return "ForgeBot is running!"
 
+
+if __name__ == "__main__":
+    app.run()
