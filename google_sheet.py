@@ -182,11 +182,11 @@ def get_master_leaderboard(period: str = "today") -> str:
     return "\n".join(lines)
 
 # -----------------------------
-# Last Week helpers (for weekly auto-post)
+# Current Week helpers (for weekly auto-post on Sunday)
 # -----------------------------
-def get_last_week_date_range():
+def get_current_week_date_range():
     """
-    Returns (start, end) datetime for last week (Monday 00:00 to Sunday 23:59 PST)
+    Returns (start, end) datetime for current week (Monday 00:00 to now)
     """
     now = datetime.now(PST)
     
@@ -195,26 +195,22 @@ def get_last_week_date_range():
     this_monday = now - timedelta(days=days_since_monday)
     this_monday = this_monday.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Last week is 7 days before
-    last_monday = this_monday - timedelta(days=7)
-    last_sunday = this_monday - timedelta(seconds=1)  # 23:59:59 Sunday
-    
-    return last_monday, last_sunday
+    return this_monday, now
 
-def get_master_leaderboard_last_week() -> str:
+def get_master_leaderboard_current_week() -> str:
     """
-    Get master leaderboard for the previous week (Monday-Sunday)
+    Get master leaderboard for the current week (Monday through now)
     """
     rows = _load_all_deals()
     
-    last_monday, last_sunday = get_last_week_date_range()
+    this_monday, now = get_current_week_date_range()
     
-    # Filter to last week only
+    # Filter to current week
     filtered = []
     for row in rows:
         ts_str = row.get("timestamp", "")
         row_time = parse_timestamp(ts_str)
-        if last_monday <= row_time <= last_sunday:
+        if this_monday <= row_time <= now:
             filtered.append(row)
     
     totals = defaultdict(int)
