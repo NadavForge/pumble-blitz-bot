@@ -39,20 +39,28 @@ CHANNEL_CACHE = {}
 # -----------------------------
 # Helper to call Slack API
 # -----------------------------
-def slack_api(method, params=None):
+def slack_api_get(method, params=None):
+    """Use GET for info methods (conversations.info, users.info, auth.test)"""
+    url = f"https://slack.com/api/{method}"
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+    resp = requests.get(url, headers=headers, params=params or {})
+    return resp.json()
+
+def slack_api_post(method, payload=None):
+    """Use POST for action methods (chat.postMessage)"""
     url = f"https://slack.com/api/{method}"
     headers = {
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json; charset=utf-8",
     }
-    resp = requests.post(url, headers=headers, json=params or {})
+    resp = requests.post(url, headers=headers, json=payload or {})
     return resp.json()
 
 def get_user_name(user_id):
     if user_id in USER_CACHE:
         return USER_CACHE[user_id]
 
-    data = slack_api("users.info", {"user": user_id})
+    data = slack_api_get("users.info", {"user": user_id})
     if data.get("ok"):
         profile = data["user"].get("profile", {})
         name = profile.get("display_name") or profile.get("real_name") or user_id
@@ -67,7 +75,7 @@ def get_channel_name(channel_id):
     if channel_id in CHANNEL_CACHE:
         return CHANNEL_CACHE[channel_id]
 
-    data = slack_api("conversations.info", {"channel": channel_id})
+    data = slack_api_get("conversations.info", {"channel": channel_id})
     if data.get("ok"):
         name = data["channel"].get("name") or channel_id
     else:
@@ -81,13 +89,7 @@ def get_channel_name(channel_id):
 # Helper: send message back into Slack
 # -----------------------------
 def send_message(channel, text):
-    url = "https://slack.com/api/chat.postMessage"
-    headers = {
-        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    payload = {"channel": channel, "text": text}
-    requests.post(url, headers=headers, json=payload)
+    slack_api_post("chat.postMessage", {"channel": channel, "text": text})
 
 # -----------------------------
 # Deal detection pattern
