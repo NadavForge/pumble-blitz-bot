@@ -197,5 +197,19 @@ def sheet_test():
     except Exception as e:
         return f"<pre>ERROR:\n{e}</pre>", 500
 
+@app.route("/test-creds")
+def test_creds():
+    import os
+    path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not path:
+        return "No env var found"
+
+    try:
+        with open(path, "r") as f:
+            data = f.read()
+        return "Loaded secret file successfully! Length: " + str(len(data))
+    except Exception as e:
+        return "ERROR: " + str(e)
+
 if __name__ == "__main__":
     app.run(debug=True)
