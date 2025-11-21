@@ -1,13 +1,14 @@
 from flask import Flask, request, jsonify
 import requests
-import json
 import os
 import re
 from datetime import datetime, timezone
 
 from google_sheet import append_deal, get_leaderboard_for_channel, get_master_leaderboard
 
-# Tokens from environment variables (Render)
+# -----------------------------
+# Environment Variables
+# -----------------------------
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 
@@ -18,6 +19,24 @@ if not SLACK_BOT_TOKEN:
 # Flask app
 # -----------------------------
 app = Flask(__name__)
+
+# -----------------------------
+# Bot User ID (fetched on startup)
+# -----------------------------
+SLACK_BOT_USER_ID = None
+
+def fetch_bot_user_id():
+    """Fetch the bot's own user ID using auth.test"""
+    global SLACK_BOT_USER_ID
+    try:
+        data = slack_api("auth.test")
+        if data.get("ok"):
+            SLACK_BOT_USER_ID = data.get("user_id")
+            print(f"Bot User ID fetched: {SLACK_BOT_USER_ID}")
+        else:
+            print(f"Warning: Could not fetch bot user ID: {data.get('error')}")
+    except Exception as e:
+        print(f"Warning: Exception fetching bot user ID: {e}")
 
 # -----------------------------
 # Cache for user & channel lookups
@@ -46,6 +65,7 @@ def get_user_name(user_id):
         profile = data["user"].get("profile", {})
         name = profile.get("display_name") or profile.get("real_name") or user_id
     else:
+        print(f"Warning: users.info failed for {user_id}: {data.get('error')}")
         name = user_id
 
     USER_CACHE[user_id] = name
@@ -59,6 +79,7 @@ def get_channel_name(channel_id):
     if data.get("ok"):
         name = data["channel"].get("name") or channel_id
     else:
+        print(f"Warning: conversations.info failed for {channel_id}: {data.get('error')}")
         name = channel_id
 
     CHANNEL_CACHE[channel_id] = name
@@ -73,34 +94,23 @@ def send_message(channel, text):
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "channel": channel,
-        "text": text,
-    }
+    payload = {"channel": channel, "text": text}
     requests.post(url, headers=headers, json=payload)
 
 # -----------------------------
 # Deal detection pattern
+# Matches: 1g, 2G, 1gb, 1GB, 1gig, 2gigs, "1g too easy", etc.
 # -----------------------------
-DEAL_PATTERN = re.compile(r"\b([1-9])\s*(g|gb|gig)s?\b", re.IGNORECASE)
+DEAL_PATTERN = re.compile(r"\b[1-9]\s*(g|gb|gig)s?\b", re.IGNORECASE)
 
-def extract_deal_count(text):
+def is_deal_message(text):
     """
-    Returns int number of deals if text contains deal-style message:
-    1g, 2g, 1gb, 1gig, 2G im ramping, etc.
-    Otherwise returns 0.
+    Returns True if text contains a deal-style message.
+    Every valid deal message = exactly 1 deal (per spec).
     """
     if not text:
-        return 0
-
-    match = DEAL_PATTERN.search(text)
-    if not match:
-        return 0
-
-    try:
-        return int(match.group(1))
-    except:
-        return 0
+        return False
+    return bool(DEAL_PATTERN.search(text))
 
 # -----------------------------
 # ROUTING
@@ -109,7 +119,6 @@ def extract_deal_count(text):
 def home():
     return "Slack Bot Running"
 
-# Slack sometimes GET checks the route
 @app.route("/slack/events", methods=["GET"])
 def slack_events_get():
     return "OK", 200
@@ -119,71 +128,77 @@ def slack_events():
     data = request.get_json()
     print("Incoming Slack Event:", data)
 
-    # Slack challenge verification
+    # Slack challenge verification (required for initial setup)
     if "challenge" in data:
         return jsonify({"challenge": data["challenge"]})
 
     # Process events
     if "event" in data:
         event = data["event"]
-
-        # Ignore bot messages
+        
+        # --- BOT LOOP PREVENTION ---
+        # 1. Ignore bot_message subtype
         if event.get("subtype") == "bot_message":
             return "ok", 200
+        
+        # 2. Ignore messages from this bot's own user ID
+        user_id = event.get("user")
+        if SLACK_BOT_USER_ID and user_id == SLACK_BOT_USER_ID:
+            return "ok", 200
+        
+        # 3. Ignore if bot_id is present (another safety check)
+        if event.get("bot_id"):
+            return "ok", 200
 
-        # Only respond to real messages
+        # Only process regular messages
         if event.get("type") != "message":
             return "ok", 200
 
-        user_id = event.get("user")
         text = event.get("text") or ""
         channel_id = event.get("channel")
 
-        # Convert IDs into readable names
+        # Convert IDs to human-readable names
         channel_name = get_channel_name(channel_id)
 
         # -----------------------------
-        # AUTO-DETECT DEAL CHANNELS (must end with "-deals")
+        # Only process deal channels (must end with "-deals")
         # -----------------------------
         is_deal_channel = channel_name.lower().endswith("-deals")
 
         # -----------------------------
         # 1) DEAL DETECTION LOGIC
         # -----------------------------
-        deal_count = extract_deal_count(text)
-
-        if deal_count > 0 and is_deal_channel and user_id:
+        if is_deal_message(text) and is_deal_channel and user_id:
             user_name = get_user_name(user_id)
             timestamp = datetime.now(timezone.utc).isoformat()
 
-            # Log deal to Google Sheets
+            # Log exactly 1 deal per valid message
             append_deal(
                 user_name=user_name,
                 channel_name=channel_name,
-                deals=deal_count,
+                deals=1,  # Always 1 deal per message (per spec)
                 timestamp=timestamp
             )
-
-            # Optional confirmation message:
-            # send_message(channel_id, f"Logged {deal_count}g for *{user_name}*")
+            print(f"Logged 1 deal for {user_name} in {channel_name}")
 
         # -----------------------------
         # 2) LEADERBOARD COMMANDS
         # -----------------------------
         lower = text.lower().strip()
 
-        # Channel-only leaderboard
         if lower == "leaderboard":
             leaderboard_text = get_leaderboard_for_channel(channel_name)
             send_message(channel_id, leaderboard_text or f"No deals logged yet for {channel_name}.")
-        
-        # Master leaderboard (all blitzes)
+
         elif lower == "master leaderboard":
             leaderboard_text = get_master_leaderboard()
             send_message(channel_id, leaderboard_text or "No deals logged yet.")
 
     return "ok", 200
 
+# -----------------------------
+# Debug/Test Routes
+# -----------------------------
 import traceback
 
 @app.route("/sheet-test")
@@ -194,22 +209,30 @@ def sheet_test():
         return "SUCCESS: Connected to Google Sheets!"
     except Exception as e:
         tb = traceback.format_exc()
-        print("SHEET TEST ERROR:", tb)   # prints full error to Render logs
+        print("SHEET TEST ERROR:", tb)
         return "<pre>ERROR:\n" + tb + "</pre>"
 
 @app.route("/test-creds")
 def test_creds():
-    import os
     path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not path:
         return "No env var found"
-
     try:
         with open(path, "r") as f:
             data = f.read()
         return "Loaded secret file successfully! Length: " + str(len(data))
     except Exception as e:
         return "ERROR: " + str(e)
+
+@app.route("/bot-id")
+def bot_id_check():
+    """Debug route to verify bot user ID was fetched"""
+    return f"Bot User ID: {SLACK_BOT_USER_ID or 'NOT SET'}"
+
+# -----------------------------
+# Startup: Fetch bot user ID
+# -----------------------------
+fetch_bot_user_id()
 
 if __name__ == "__main__":
     app.run(debug=True)
