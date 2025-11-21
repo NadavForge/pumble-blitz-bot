@@ -28,14 +28,20 @@ CHANNEL_CACHE = {}
 # -----------------------------
 # Helper to call Slack API
 # -----------------------------
-def slack_api(method, params=None):
+def slack_api(method, params=None, http_method="POST"):
     url = f"https://slack.com/api/{method}"
     headers = {
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json; charset=utf-8",
     }
-    resp = requests.post(url, headers=headers, json=params or {})
+
+    if http_method == "GET":
+        resp = requests.get(url, headers=headers, params=params or {})
+    else:
+        resp = requests.post(url, headers=headers, json=params or {})
+
     return resp.json()
+
 
 def get_user_name(user_id):
     if user_id in USER_CACHE:
@@ -55,7 +61,8 @@ def get_channel_name(channel_id):
     if channel_id in CHANNEL_CACHE:
         return CHANNEL_CACHE[channel_id]
 
-    data = slack_api("conversations.info", {"channel": channel_id})
+    data = slack_api("conversations.info", {"channel": channel_id}, http_method="GET")
+
     if data.get("ok"):
         name = data["channel"].get("name") or channel_id
     else:
