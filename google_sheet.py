@@ -20,7 +20,11 @@ if not SPREADSHEET_ID:
 # Google Sheet connection helpers
 # -----------------------------
 def _get_client():
-    creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+    import os
+
+    creds_path = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+    creds = service_account.Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+
     client = gspread.authorize(creds)
     return client
 
