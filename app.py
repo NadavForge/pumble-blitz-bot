@@ -338,9 +338,9 @@ WEEKLY_POST_SECRET = os.environ.get("WEEKLY_POST_SECRET", "")
 def weekly_leaderboard():
     """
     Endpoint for external cron job to trigger weekly master leaderboard post.
-    Posts the PREVIOUS week's results (Mon-Sun).
+    Posts the CURRENT week's results (Mon through now).
     Call with ?secret=YOUR_SECRET for security.
-    Run on Sunday night or Monday morning.
+    Run on Sunday evening.
     """
     provided_secret = request.args.get("secret", "")
     if not WEEKLY_POST_SECRET or provided_secret != WEEKLY_POST_SECRET:
@@ -351,16 +351,16 @@ def weekly_leaderboard():
         print("Error: LEADERBOARD_CHANNEL_ID not set")
         return "LEADERBOARD_CHANNEL_ID not configured", 500
     
-    from google_sheet import get_master_leaderboard_last_week, get_last_week_date_range
+    from google_sheet import get_master_leaderboard_current_week, get_current_week_date_range
     
-    leaderboard_text = get_master_leaderboard_last_week()
+    leaderboard_text = get_master_leaderboard_current_week()
     if not leaderboard_text:
-        leaderboard_text = "No deals logged last week."
+        leaderboard_text = "No deals logged this week."
     
-    start_date, end_date = get_last_week_date_range()
+    start_date, end_date = get_current_week_date_range()
     date_range = f"{start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}"
     
-    message = f"📊 *Weekly Summary — {date_range}*\n\n*Master Leaderboard – All Markets (Last Week)*\n{leaderboard_text}"
+    message = f"📊 *Weekly Summary — {date_range}*\n\n*Master Leaderboard – All Markets (This Week)*\n{leaderboard_text}"
     
     slack_api_post("chat.postMessage", {
         "channel": LEADERBOARD_CHANNEL_ID,
