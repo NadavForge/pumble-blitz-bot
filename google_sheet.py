@@ -162,11 +162,16 @@ def get_master_leaderboard(period: str = "today") -> str:
     rows = _load_all_deals()
     rows = filter_deals_by_period(rows, period)
     
+    # Track totals and market breakdown per user
     totals = defaultdict(int)
+    user_markets = defaultdict(lambda: defaultdict(int))
+    
     for row in rows:
         user = row.get("user_name") or "Unknown"
+        market = row.get("market") or "unknown"
         deals = int(row.get("deals") or 0)
         totals[user] += deals
+        user_markets[user][market] += deals
 
     if not totals:
         return ""
@@ -176,7 +181,13 @@ def get_master_leaderboard(period: str = "today") -> str:
     lines = []
     rank = 1
     for user, deals in sorted_rows:
-        lines.append(f"{rank}. {user} — {deals}")
+        # Show market for daily/weekly, not for monthly
+        if period in ("today", "week"):
+            markets = user_markets[user]
+            primary_market = max(markets, key=markets.get).title()
+            lines.append(f"{rank}. {user} ({primary_market}) — {deals}")
+        else:
+            lines.append(f"{rank}. {user} — {deals}")
         rank += 1
 
     return "\n".join(lines)
@@ -200,6 +211,7 @@ def get_current_week_date_range():
 def get_master_leaderboard_current_week() -> str:
     """
     Get master leaderboard for the current week (Monday through now)
+    Shows each rep's primary market (where they logged most deals)
     """
     rows = _load_all_deals()
     
@@ -213,11 +225,16 @@ def get_master_leaderboard_current_week() -> str:
         if this_monday <= row_time <= now:
             filtered.append(row)
     
+    # Track totals and market breakdown per user
     totals = defaultdict(int)
+    user_markets = defaultdict(lambda: defaultdict(int))
+    
     for row in filtered:
         user = row.get("user_name") or "Unknown"
+        market = row.get("market") or "unknown"
         deals = int(row.get("deals") or 0)
         totals[user] += deals
+        user_markets[user][market] += deals
 
     if not totals:
         return ""
@@ -227,7 +244,10 @@ def get_master_leaderboard_current_week() -> str:
     lines = []
     rank = 1
     for user, deals in sorted_rows:
-        lines.append(f"{rank}. {user} — {deals}")
+        # Find primary market (most deals)
+        markets = user_markets[user]
+        primary_market = max(markets, key=markets.get).title()
+        lines.append(f"{rank}. {user} ({primary_market}) — {deals}")
         rank += 1
 
     return "\n".join(lines)
