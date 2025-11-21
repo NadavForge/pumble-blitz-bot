@@ -1,26 +1,23 @@
 from flask import Flask, request, jsonify
-from google_sheet import add_deal
-import re
+import requests
 
 app = Flask(__name__)
 
-@app.route("/deal", methods=["POST"])
-def deal():
+PUMBLE_WEBHOOK = "https://api.pumble.com/workspaces/6914e116ca19779dd71ade87/incomingWebhooks/postMessage/AcAmLgwknJcG6Cp7aUgkKZgn"
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot is live!", 200
+
+@app.route("/pumble", methods=["POST"])
+def pumble():
     data = request.json
+    text = data.get("text", "No message received.")
 
-    # Extract info from Pumble slash command payload
-    user = data.get("user_name", "Unknown User")
-    text = data.get("text", "").strip()
-    channel = data.get("channel_name", "Unknown blitz")
+    # Send message to Pumble
+    requests.post(PUMBLE_WEBHOOK, json={"text": text})
 
-    # Accept only "1g" or "2g"
-    if text not in ["1g", "2g"]:
-        return jsonify({"text": "❌ Invalid deal format. Use: /deal 1g or /deal 2g"})
-
-    # Log to Google Sheets
-    add_deal(channel, user, text)
-
-    return jsonify({"text": f"✅ Logged deal: {text} for {user} in {channel}."})
+    return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    app.run()
