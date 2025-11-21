@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime, timezone
 
-from google_sheet import append_deal, get_leaderboard_for_channel, get_master_leaderboard
+from google_sheet import append_deal, get_master_leaderboard
 
 # -----------------------------
 # Environment Variables
@@ -92,9 +92,36 @@ def send_message(channel, text):
     slack_api_post("chat.postMessage", {"channel": channel, "text": text})
 
 # -----------------------------
-# Deal detection pattern
-# Matches: 1g, 2G, 1gb, 1GB, 1gig, 2gigs, "1g too easy", etc.
+# Per-channel leaderboard
 # -----------------------------
+def get_leaderboard_for_channel(channel_name: str) -> str:
+    from google_sheet import _load_all_deals
+    from collections import defaultdict
+    
+    rows = _load_all_deals()
+    totals = defaultdict(int)
+
+    for row in rows:
+        if row.get("channel_name") == channel_name:
+            user = row.get("user_name") or "Unknown"
+            deals = int(row.get("deals") or 0)
+            totals[user] += deals
+
+    if not totals:
+        return ""
+
+    # Extract market name and capitalize (e.g., "blitz-arkansas-deals" → "Arkansas")
+    market = channel_name.lower().replace("blitz-", "").replace("-deals", "").title()
+
+    sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+
+    lines = [f"*Leaderboard – {market}*"]
+    rank = 1
+    for user, deals in sorted_rows:
+        lines.append(f"{rank}. {user} — {deals}")
+        rank += 1
+
+    return "\n".join(lines)
 DEAL_PATTERN = re.compile(r"\b[1-9]\s*(g|gb|gig)s?\b", re.IGNORECASE)
 
 def is_deal_message(text):
