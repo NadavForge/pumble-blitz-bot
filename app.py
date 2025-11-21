@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 import requests
 import json
 
-SLACK_BOT_TOKEN = "xoxb-9953760733959-9965935131925-6ZzMkqxsNxfGx37DLYpdInCQ"
-SLACK_SIGNING_SECRET = "53f81950ca5dcb4a60b70815abd3df81"
+SLACK_BOT_TOKEN = "SLACK_BOT_TOKEN"
+SLACK_SIGNING_SECRET = "SLACK_SIGNING_SECRET"
 
 app = Flask(__name__)
 
