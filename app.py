@@ -2,9 +2,15 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import pytz
 
-from google_sheet import append_deal, get_master_leaderboard
+from google_sheet import (
+    append_deal,
+    get_master_leaderboard,
+    get_channel_leaderboard,
+    archive_and_reset_monthly
+)
 
 # -----------------------------
 # Environment Variables
@@ -14,6 +20,11 @@ SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 
 if not SLACK_BOT_TOKEN:
     raise ValueError("SLACK_BOT_TOKEN is missing in environment variables")
+
+# -----------------------------
+# Timezone Config
+# -----------------------------
+PST = pytz.timezone("America/Los_Angeles")
 
 # -----------------------------
 # Flask app
@@ -92,36 +103,9 @@ def send_message(channel, text):
     slack_api_post("chat.postMessage", {"channel": channel, "text": text})
 
 # -----------------------------
-# Per-channel leaderboard
+# Deal detection pattern
+# Matches: 1g, 2G, 1gb, 1GB, 1gig, 2gigs, "1g too easy", etc.
 # -----------------------------
-def get_leaderboard_for_channel(channel_name: str) -> str:
-    from google_sheet import _load_all_deals
-    from collections import defaultdict
-    
-    rows = _load_all_deals()
-    totals = defaultdict(int)
-
-    for row in rows:
-        if row.get("channel_name") == channel_name:
-            user = row.get("user_name") or "Unknown"
-            deals = int(row.get("deals") or 0)
-            totals[user] += deals
-
-    if not totals:
-        return ""
-
-    # Extract market name and capitalize (e.g., "blitz-arkansas-deals" → "Arkansas")
-    market = channel_name.lower().replace("blitz-", "").replace("-deals", "").title()
-
-    sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
-
-    lines = [f"*Leaderboard – {market}*"]
-    rank = 1
-    for user, deals in sorted_rows:
-        lines.append(f"{rank}. {user} — {deals}")
-        rank += 1
-
-    return "\n".join(lines)
 DEAL_PATTERN = re.compile(r"\b[1-9]\s*(g|gb|gig)s?\b", re.IGNORECASE)
 
 def is_deal_message(text):
@@ -132,6 +116,57 @@ def is_deal_message(text):
     if not text:
         return False
     return bool(DEAL_PATTERN.search(text))
+
+# -----------------------------
+# Parse leaderboard commands
+# -----------------------------
+def parse_leaderboard_command(text):
+    """
+    Parse leaderboard commands and return (command_type, period)
+    
+    Commands:
+      leaderboard           -> ("channel", "today")
+      leaderboard today     -> ("channel", "today")
+      leaderboard week      -> ("channel", "week")
+      leaderboard month     -> ("channel", "month")
+      master leaderboard    -> ("master", "today")
+      master leaderboard today  -> ("master", "today")
+      master leaderboard week   -> ("master", "week")
+      master leaderboard month  -> ("master", "month")
+    """
+    lower = text.lower().strip()
+    
+    # Master leaderboard variants
+    if lower.startswith("master leaderboard"):
+        remainder = lower.replace("master leaderboard", "").strip()
+        if remainder == "week":
+            return ("master", "week")
+        elif remainder == "month":
+            return ("master", "month")
+        else:
+            return ("master", "today")
+    
+    # Channel leaderboard variants
+    if lower.startswith("leaderboard"):
+        remainder = lower.replace("leaderboard", "").strip()
+        if remainder == "week":
+            return ("channel", "week")
+        elif remainder == "month":
+            return ("channel", "month")
+        else:
+            return ("channel", "today")
+    
+    return (None, None)
+
+def get_period_label(period):
+    """Return human-readable label for period"""
+    if period == "today":
+        return "Today"
+    elif period == "week":
+        return "This Week"
+    elif period == "month":
+        return "This Month"
+    return ""
 
 # -----------------------------
 # ROUTING
@@ -158,32 +193,23 @@ def slack_events():
         event = data["event"]
         
         # --- BOT LOOP PREVENTION ---
-        # 1. Ignore bot_message subtype
         if event.get("subtype") == "bot_message":
             return "ok", 200
         
-        # 2. Ignore messages from this bot's own user ID
         user_id = event.get("user")
         if SLACK_BOT_USER_ID and user_id == SLACK_BOT_USER_ID:
             return "ok", 200
         
-        # 3. Ignore if bot_id is present (another safety check)
         if event.get("bot_id"):
             return "ok", 200
 
-        # Only process regular messages
         if event.get("type") != "message":
             return "ok", 200
 
         text = event.get("text") or ""
         channel_id = event.get("channel")
 
-        # Convert IDs to human-readable names
         channel_name = get_channel_name(channel_id)
-
-        # -----------------------------
-        # Only process deal channels (must end with "-deals")
-        # -----------------------------
         is_deal_channel = channel_name.lower().endswith("-deals")
 
         # -----------------------------
@@ -191,13 +217,12 @@ def slack_events():
         # -----------------------------
         if is_deal_message(text) and is_deal_channel and user_id:
             user_name = get_user_name(user_id)
-            timestamp = datetime.now(timezone.utc).isoformat()
+            timestamp = datetime.now(PST).isoformat()
 
-            # Log exactly 1 deal per valid message
             append_deal(
                 user_name=user_name,
                 channel_name=channel_name,
-                deals=1,  # Always 1 deal per message (per spec)
+                deals=1,
                 timestamp=timestamp
             )
             print(f"Logged 1 deal for {user_name} in {channel_name}")
@@ -205,15 +230,28 @@ def slack_events():
         # -----------------------------
         # 2) LEADERBOARD COMMANDS
         # -----------------------------
-        lower = text.lower().strip()
-
-        if lower == "leaderboard":
-            leaderboard_text = get_leaderboard_for_channel(channel_name)
-            send_message(channel_id, leaderboard_text or f"No deals logged yet for {channel_name}.")
-
-        elif lower == "master leaderboard":
-            leaderboard_text = get_master_leaderboard()
-            send_message(channel_id, leaderboard_text or "No deals logged yet.")
+        command_type, period = parse_leaderboard_command(text)
+        
+        if command_type == "channel":
+            market = channel_name.lower().replace("blitz-", "").replace("-deals", "").title()
+            period_label = get_period_label(period)
+            
+            leaderboard_text = get_channel_leaderboard(channel_name, period)
+            if leaderboard_text:
+                header = f"*Leaderboard – {market} ({period_label})*\n{leaderboard_text}"
+            else:
+                header = f"No deals logged yet for {market} ({period_label.lower()})."
+            send_message(channel_id, header)
+        
+        elif command_type == "master":
+            period_label = get_period_label(period)
+            
+            leaderboard_text = get_master_leaderboard(period)
+            if leaderboard_text:
+                header = f"*Master Leaderboard – All Markets ({period_label})*\n{leaderboard_text}"
+            else:
+                header = f"No deals logged yet ({period_label.lower()})."
+            send_message(channel_id, header)
 
     return "ok", 200
 
@@ -262,7 +300,6 @@ def daily_leaderboard():
     Endpoint for external cron job to trigger daily master leaderboard post.
     Call with ?secret=YOUR_SECRET for security.
     """
-    # Security check
     provided_secret = request.args.get("secret", "")
     if not DAILY_POST_SECRET or provided_secret != DAILY_POST_SECRET:
         print("Warning: daily-leaderboard called with invalid or missing secret")
@@ -272,15 +309,12 @@ def daily_leaderboard():
         print("Error: LEADERBOARD_CHANNEL_ID not set")
         return "LEADERBOARD_CHANNEL_ID not configured", 500
     
-    # Generate and post master leaderboard
-    leaderboard_text = get_master_leaderboard()
+    leaderboard_text = get_master_leaderboard("today")
     if not leaderboard_text:
-        leaderboard_text = "No deals logged yet."
+        leaderboard_text = "No deals logged today."
     
-    # Add header for daily post
-    from datetime import datetime
-    today = datetime.now().strftime("%B %d, %Y")
-    message = f"📊 *Daily Summary — {today}*\n\n{leaderboard_text}"
+    today = datetime.now(PST).strftime("%B %d, %Y")
+    message = f"📊 *Daily Summary — {today}*\n\n*Master Leaderboard – All Markets (Today)*\n{leaderboard_text}"
     
     slack_api_post("chat.postMessage", {
         "channel": LEADERBOARD_CHANNEL_ID,
@@ -289,6 +323,39 @@ def daily_leaderboard():
     
     print(f"Daily leaderboard posted to {LEADERBOARD_CHANNEL_ID}")
     return "OK", 200
+
+# -----------------------------
+# Monthly Archive Endpoint
+# -----------------------------
+ARCHIVE_SECRET = os.environ.get("ARCHIVE_SECRET", "")
+
+@app.route("/monthly-archive", methods=["GET", "POST"])
+def monthly_archive():
+    """
+    Endpoint for external cron job to archive and reset monthly data.
+    Call with ?secret=YOUR_SECRET for security.
+    Run at midnight PST on the 1st of each month.
+    """
+    provided_secret = request.args.get("secret", "")
+    if not ARCHIVE_SECRET or provided_secret != ARCHIVE_SECRET:
+        print("Warning: monthly-archive called with invalid or missing secret")
+        return "Unauthorized", 401
+    
+    try:
+        archive_name = archive_and_reset_monthly()
+        print(f"Monthly archive complete: {archive_name}")
+        
+        # Optional: post notification to leaderboard channel
+        if LEADERBOARD_CHANNEL_ID:
+            slack_api_post("chat.postMessage", {
+                "channel": LEADERBOARD_CHANNEL_ID,
+                "text": f"📁 Monthly data archived to `{archive_name}`. Leaderboards have been reset for the new month!"
+            })
+        
+        return f"Archived to {archive_name}", 200
+    except Exception as e:
+        print(f"Archive error: {e}")
+        return f"Error: {e}", 500
 
 if __name__ == "__main__":
     app.run(debug=True)
