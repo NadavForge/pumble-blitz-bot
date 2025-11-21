@@ -1,26 +1,129 @@
+import os
+from collections import defaultdict
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
-def connect_sheet():
-    # Define scope
-    scope = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
+# -----------------------------
+# Google Sheet Config
+# -----------------------------
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
-    # Load credentials from the JSON file you uploaded
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+SPREADSHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 
-    # Authorize the client
+if not SPREADSHEET_ID:
+    raise ValueError("GOOGLE_SHEET_ID environment variable is not set.")
+
+# -----------------------------
+# Google Sheet connection helpers
+# -----------------------------
+def _get_client():
+    creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
     client = gspread.authorize(creds)
+    return client
 
-    # Open your sheet by name
-    sheet = client.open("BlitzDealTracker").sheet1
+def _get_sheet():
+    client = _get_client()
+    sh = client.open_by_key(SPREADSHEET_ID)
 
-    return sheet
+    try:
+        ws = sh.worksheet("deals")
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title="deals", rows="2000", cols="10")
+        ws.append_row(["timestamp", "user_name", "market", "channel_name", "deals"])
+    
+    return ws
 
-def add_deal(blitz_name, user, message):
-    sheet = connect_sheet()
+# -----------------------------
+# Auto-detect market
+# Example: "blitz-arkansas-deals" → "arkansas"
+# -----------------------------
+def extract_market(channel_name: str) -> str:
+    """
+    Extracts market from channel name pattern:
+    blitz-<market>-deals
+    e.g. blitz-arkansas-deals → arkansas
+    """
+    if not channel_name:
+        return "unknown"
 
-    # Append a row: BlitzName | User | Message | Timestamp
-    sheet.append_row([blitz_name, user, message])
+    parts = channel_name.lower().split("-")
+    if len(parts) >= 3 and parts[0] == "blitz" and parts[-1] == "deals":
+        return parts[1]  # market name
+    return "unknown"
+
+# -----------------------------
+# Log deals
+# -----------------------------
+def append_deal(user_name: str, channel_name: str, deals: int, timestamp: str):
+    ws = _get_sheet()
+    market = extract_market(channel_name)
+
+    ws.append_row([
+        timestamp,
+        user_name,
+        market,
+        channel_name,
+        deals
+    ])
+
+# -----------------------------
+# Load all deal rows
+# -----------------------------
+def _load_all_deals():
+    ws = _get_sheet()
+    rows = ws.get_all_records()   # returns list of dicts
+    return rows
+
+# -----------------------------
+# Per-channel leaderboard
+# -----------------------------
+def get_leaderboard_for_channel(channel_name: str) -> str:
+    rows = _load_all_deals()
+    totals = defaultdict(int)
+
+    for row in rows:
+        if row.get("channel_name") == channel_name:
+            user = row.get("user_name") or "Unknown"
+            deals = int(row.get("deals") or 0)
+            totals[user] += deals
+
+    if not totals:
+        return ""
+
+    sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+
+    lines = [f"*Leaderboard – {channel_name}*"]
+    rank = 1
+    for user, deals in sorted_rows:
+        lines.append(f"{rank}. *{user}* — {deals}g")
+        rank += 1
+
+    return "\n".join(lines)
+
+# -----------------------------
+# Master leaderboard across all markets
+# -----------------------------
+def get_master_leaderboard() -> str:
+    rows = _load_all_deals()
+    totals = defaultdict(int)
+
+    for row in rows:
+        user = row.get("user_name") or "Unknown"
+        deals = int(row.get("deals") or 0)
+        totals[user] += deals
+
+    if not totals:
+        return ""
+
+    sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+
+    lines = ["*Master Leaderboard – All Markets*"]
+    rank = 1
+    for user, deals in sorted_rows:
+        lines.append(f"{rank}. *{user}* — {deals}g")
+        rank += 1
+
+    return "\n".join(lines)
