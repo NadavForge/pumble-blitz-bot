@@ -184,6 +184,18 @@ def slack_events():
 
     return "ok", 200
 
+@app.route("/sheet-test")
+def sheet_test():
+    try:
+        from google_sheet import get_leaderboard_for_channel
+
+        # Use a fake channel for testing
+        test_text = get_leaderboard_for_channel("test-channel")
+
+        return f"<pre>{test_text}</pre>", 200
+
+    except Exception as e:
+        return f"<pre>ERROR:\n{e}</pre>", 500
 
 if __name__ == "__main__":
     app.run(debug=True)
