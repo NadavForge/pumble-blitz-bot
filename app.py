@@ -21,22 +21,14 @@ if not SLACK_BOT_TOKEN:
 app = Flask(__name__)
 
 # -----------------------------
-# Bot User ID (fetched on startup)
+# Bot User ID (from environment variable)
 # -----------------------------
-SLACK_BOT_USER_ID = None
+SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID")
 
-def fetch_bot_user_id():
-    """Fetch the bot's own user ID using auth.test"""
-    global SLACK_BOT_USER_ID
-    try:
-        data = slack_api("auth.test")
-        if data.get("ok"):
-            SLACK_BOT_USER_ID = data.get("user_id")
-            print(f"Bot User ID fetched: {SLACK_BOT_USER_ID}")
-        else:
-            print(f"Warning: Could not fetch bot user ID: {data.get('error')}")
-    except Exception as e:
-        print(f"Warning: Exception fetching bot user ID: {e}")
+if not SLACK_BOT_USER_ID:
+    print("WARNING: SLACK_BOT_USER_ID not set. Bot loop prevention may not work!")
+else:
+    print(f"Bot User ID loaded: {SLACK_BOT_USER_ID}")
 
 # -----------------------------
 # Cache for user & channel lookups
@@ -228,11 +220,6 @@ def test_creds():
 def bot_id_check():
     """Debug route to verify bot user ID was fetched"""
     return f"Bot User ID: {SLACK_BOT_USER_ID or 'NOT SET'}"
-
-# -----------------------------
-# Startup: Fetch bot user ID
-# -----------------------------
-fetch_bot_user_id()
 
 if __name__ == "__main__":
     app.run(debug=True)
