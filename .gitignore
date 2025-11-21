@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 
 # Credentials (we’ll temporarily override this)
-credentials.json
+
 
 # Environment
 .env
