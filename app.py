@@ -226,6 +226,7 @@ def slack_events():
                 timestamp=timestamp
             )
             print(f"Logged 1 deal for {user_name} in {channel_name}")
+            send_message(channel_id, f"✅ Deal logged for {user_name}!")
 
         # -----------------------------
         # 2) LEADERBOARD COMMANDS
