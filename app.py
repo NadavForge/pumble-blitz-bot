@@ -326,6 +326,59 @@ def daily_leaderboard():
     return "OK", 200
 
 # -----------------------------
+# Nightly Reminder to All Blitz Channels
+# -----------------------------
+REMINDER_SECRET = os.environ.get("REMINDER_SECRET", "")
+
+@app.route("/nightly-reminder", methods=["GET", "POST"])
+def nightly_reminder():
+    """
+    Endpoint for external cron job to send nightly reminders to all -deals channels.
+    Call with ?secret=YOUR_SECRET for security.
+    Run at 8 PM EST daily.
+    """
+    provided_secret = request.args.get("secret", "")
+    if not REMINDER_SECRET or provided_secret != REMINDER_SECRET:
+        print("Warning: nightly-reminder called with invalid or missing secret")
+        return "Unauthorized", 401
+    
+    # Get all channels the bot is in
+    try:
+        data = slack_api_get("conversations.list", {"types": "public_channel,private_channel"})
+        
+        if not data.get("ok"):
+            print(f"Error fetching channels: {data.get('error')}")
+            return f"Error: {data.get('error')}", 500
+        
+        channels = data.get("channels", [])
+        deals_channels = [ch for ch in channels if ch.get("name", "").endswith("-deals")]
+        
+        # Post reminder to each deals channel
+        reminder_message = "⏰ Reminder to fill out the daily form and spreadsheet with today's deals!"
+        
+        posted_count = 0
+        for channel in deals_channels:
+            channel_id = channel.get("id")
+            channel_name = channel.get("name")
+            
+            # Check if bot is a member of the channel
+            if channel.get("is_member"):
+                slack_api_post("chat.postMessage", {
+                    "channel": channel_id,
+                    "text": reminder_message
+                })
+                print(f"Posted reminder to {channel_name}")
+                posted_count += 1
+            else:
+                print(f"Skipped {channel_name} (bot not a member)")
+        
+        return f"Posted to {posted_count} channels", 200
+        
+    except Exception as e:
+        print(f"Nightly reminder error: {e}")
+        return f"Error: {e}", 500
+
+# -----------------------------
 # Monthly Archive Endpoint
 # -----------------------------
 ARCHIVE_SECRET = os.environ.get("ARCHIVE_SECRET", "")
