@@ -360,14 +360,17 @@ def nightly_reminder():
     posted_count = 0
     for channel_id in channel_ids:
         try:
-            slack_api_post("chat.postMessage", {
+            response = slack_api_post("chat.postMessage", {
                 "channel": channel_id,
                 "text": reminder_message
             })
-            print(f"Posted reminder to {channel_id}")
-            posted_count += 1
+            if response.get("ok"):
+                print(f"Posted reminder to {channel_id}")
+                posted_count += 1
+            else:
+                print(f"Failed to post to {channel_id}: {response.get('error')}")
         except Exception as e:
-            print(f"Failed to post to {channel_id}: {e}")
+            print(f"Exception posting to {channel_id}: {e}")
     
     return f"Posted to {posted_count} channels", 200
 
