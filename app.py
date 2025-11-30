@@ -355,7 +355,7 @@ def nightly_reminder():
         return "No channels configured", 400
     
     # Post reminder to each channel
-    reminder_message = "⏰ Reminder to fill out the daily form and spreadsheet with today's deals!"
+    reminder_message = "⏰ Reminder to fill out the daily form and spreadsheet with today's deals! @channel"
     
     posted_count = 0
     for channel_id in channel_ids:
