@@ -42,7 +42,7 @@ def _get_sheet():
         ws = sh.worksheet("deals")
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title="deals", rows="2000", cols="10")
-        ws.append_row(["timestamp", "user_name", "market", "channel_name", "deals"])
+        ws.append_row(["timestamp", "user_name", "market", "channel_name", "deals", "package_size_gb"])
     return ws
 
 # -----------------------------
@@ -59,10 +59,10 @@ def extract_market(channel_name: str) -> str:
 # -----------------------------
 # Log deals
 # -----------------------------
-def append_deal(user_name: str, channel_name: str, deals: int, timestamp: str):
+def append_deal(user_name: str, channel_name: str, deals: int, package_size_gb: float, timestamp: str):
     ws = _get_sheet()
     market = extract_market(channel_name)
-    ws.append_row([timestamp, user_name, market, channel_name, deals])
+    ws.append_row([timestamp, user_name, market, channel_name, deals, package_size_gb])
 
 # -----------------------------
 # Load all deal rows
