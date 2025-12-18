@@ -540,16 +540,15 @@ def weekly_leaderboard():
         print("Error: LEADERBOARD_CHANNEL_ID not set")
         return "LEADERBOARD_CHANNEL_ID not configured", 500
     
-    from google_sheet import get_master_leaderboard_current_week, get_current_week_date_range
+    from google_sheet import get_master_leaderboard, get_current_week_date_range
     
-    leaderboard_text = get_master_leaderboard_current_week()
+    # Use the new leaderboard function that returns tuple
+    leaderboard_text, period_label = get_master_leaderboard("week")
+    
     if not leaderboard_text:
         leaderboard_text = "No deals logged this week."
     
-    start_date, end_date = get_current_week_date_range()
-    date_range = f"{start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}"
-    
-    message = f"📊 *Weekly Summary — {date_range}*\n\n*Master Leaderboard – All Markets (This Week)*\n{leaderboard_text}"
+    message = f"📊 *Weekly Summary — {period_label}*\n\n*Master Leaderboard – All Markets (This Week)*\n{leaderboard_text}"
     
     slack_api_post("chat.postMessage", {
         "channel": LEADERBOARD_CHANNEL_ID,
