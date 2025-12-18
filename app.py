@@ -317,6 +317,27 @@ def bot_id_check():
     """Debug route to verify bot user ID was fetched"""
     return f"Bot User ID: {SLACK_BOT_USER_ID or 'NOT SET'}"
 
+@app.route("/debug-channels")
+def debug_channels():
+    """Debug endpoint to test channel listing"""
+    try:
+        result = slack_api_get("conversations.list", {
+            "types": "public_channel",
+            "limit": 100
+        })
+        
+        if not result.get("ok"):
+            return f"Error: {result.get('error')}", 500
+        
+        all_channels = result.get("channels", [])
+        channel_names = [ch.get("name") for ch in all_channels]
+        
+        blitz_channels = [name for name in channel_names if name.startswith("blitz-") and name.endswith("-deals")]
+        
+        return f"Found {len(all_channels)} total channels<br>Blitz channels: {', '.join(blitz_channels)}", 200
+    except Exception as e:
+        return f"Exception: {str(e)}", 500
+
 # -----------------------------
 # Daily Leaderboard Auto-Post
 # -----------------------------
@@ -376,8 +397,8 @@ def nightly_reminder():
     try:
         # Get all channels the bot has access to
         result = slack_api_get("conversations.list", {
-            "types": "public_channel,private_channel",
-            "limit": 1000  # Adjust if you have more than 1000 channels
+            "types": "public_channel",
+            "limit": 1000
         })
         
         if not result.get("ok"):
