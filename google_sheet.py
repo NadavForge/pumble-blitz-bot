@@ -511,6 +511,82 @@ def get_master_leaderboard_current_week() -> str:
     return "\n".join(lines)
 
 # -----------------------------
+# Deal Removal Functions
+# -----------------------------
+def _get_deletions_sheet():
+    """Get or create the deletions audit log sheet"""
+    sh = _get_spreadsheet()
+    try:
+        ws = sh.worksheet("deletions")
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title="deletions", rows="1000", cols="10")
+        ws.append_row(["deletion_timestamp", "user_name", "original_timestamp", "market", "channel_name", "deals", "package_size_gb"])
+    return ws
+
+def remove_last_deal(user_name: str, channel_name: str) -> tuple:
+    """
+    Remove the most recent deal for a user from today only.
+    
+    Args:
+        user_name: Name of the user
+        channel_name: Channel where deal was logged
+    
+    Returns:
+        (success: bool, message: str, deals_removed: int, gb_removed: float)
+    """
+    ws = _get_sheet()
+    deletions_ws = _get_deletions_sheet()
+    
+    # Get all records
+    all_records = ws.get_all_records()
+    
+    # Get today's date range in PST
+    now = datetime.now(PST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Filter to user's deals from today in this channel
+    user_deals_today = []
+    for idx, row in enumerate(all_records, start=2):  # start=2 because row 1 is header
+        if row.get("user_name") != user_name:
+            continue
+        if row.get("channel_name") != channel_name:
+            continue
+        
+        ts_str = row.get("timestamp", "")
+        row_time = parse_timestamp(ts_str)
+        
+        if row_time < today_start:
+            continue
+        
+        user_deals_today.append((idx, row))
+    
+    if not user_deals_today:
+        return (False, "❌ No deals found to remove from today", 0, 0)
+    
+    # Get the most recent deal (last in the list)
+    row_idx, deal_to_remove = user_deals_today[-1]
+    
+    # Log to deletions sheet
+    deletion_timestamp = datetime.now(PST).isoformat()
+    deletions_ws.append_row([
+        deletion_timestamp,
+        deal_to_remove.get("user_name"),
+        deal_to_remove.get("timestamp"),
+        deal_to_remove.get("market"),
+        deal_to_remove.get("channel_name"),
+        deal_to_remove.get("deals"),
+        deal_to_remove.get("package_size_gb")
+    ])
+    
+    # Delete the row from main sheet
+    ws.delete_rows(row_idx)
+    
+    deals_count = int(deal_to_remove.get("deals", 1))
+    gb_size = float(deal_to_remove.get("package_size_gb", 0))
+    
+    return (True, "", deals_count, gb_size)
+    
+# -----------------------------
 # Monthly Archive & Reset
 # -----------------------------
 def archive_and_reset_monthly() -> str:
