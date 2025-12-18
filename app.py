@@ -181,6 +181,14 @@ def get_period_label(period):
 def home():
     return "Slack Bot Running"
 
+@app.route("/keep-alive", methods=["GET"])
+def keep_alive():
+    """
+    Simple endpoint for external monitoring services (cron-job.org).
+    Returns 200 OK to confirm the service is running.
+    """
+    return "✅ ForgeBot is alive and running!", 200
+
 @app.route("/slack/events", methods=["GET"])
 def slack_events_get():
     return "OK", 200
