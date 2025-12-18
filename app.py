@@ -360,10 +360,11 @@ REMINDER_SECRET = os.environ.get("REMINDER_SECRET", "")
 # Comma-separated list of channel IDs to send reminders to
 REMINDER_CHANNEL_IDS = os.environ.get("REMINDER_CHANNEL_IDS", "")
 
-@app.route("/nightly-reminder", methods=["GET", "POST"])
+@@app.route("/nightly-reminder", methods=["GET", "POST"])
 def nightly_reminder():
     """
-    Endpoint for external cron job to send nightly reminders to specified channels.
+    Endpoint for external cron job to send nightly reminders to all blitz-*-deals channels.
+    Automatically discovers channels matching the pattern.
     Call with ?secret=YOUR_SECRET for security.
     Run at 8 PM EST daily.
     """
@@ -372,35 +373,68 @@ def nightly_reminder():
         print("Warning: nightly-reminder called with invalid or missing secret")
         return "Unauthorized", 401
     
-    if not REMINDER_CHANNEL_IDS:
-        print("Error: REMINDER_CHANNEL_IDS not set")
-        return "REMINDER_CHANNEL_IDS not configured", 500
-    
-    # Split comma-separated channel IDs
-    channel_ids = [ch.strip() for ch in REMINDER_CHANNEL_IDS.split(",") if ch.strip()]
-    
-    if not channel_ids:
-        return "No channels configured", 400
-    
-    # Post reminder to each channel
-    reminder_message = "⏰ Reminder to fill out the daily form and spreadsheet with today's deals!"
-    
-    posted_count = 0
-    for channel_id in channel_ids:
-        try:
-            response = slack_api_post("chat.postMessage", {
-                "channel": channel_id,
-                "text": reminder_message
-            })
-            if response.get("ok"):
-                print(f"Posted reminder to {channel_id}")
-                posted_count += 1
-            else:
-                print(f"Failed to post to {channel_id}: {response.get('error')}")
-        except Exception as e:
-            print(f"Exception posting to {channel_id}: {e}")
-    
-    return f"Posted to {posted_count} channels", 200
+    try:
+        # Get all channels the bot has access to
+        result = slack_api_get("conversations.list", {
+            "types": "public_channel,private_channel",
+            "limit": 1000  # Adjust if you have more than 1000 channels
+        })
+        
+        if not result.get("ok"):
+            print(f"Error fetching channels: {result.get('error')}")
+            return f"Error: {result.get('error')}", 500
+        
+        all_channels = result.get("channels", [])
+        
+        # Filter for blitz-*-deals channels
+        blitz_channels = [
+            ch for ch in all_channels 
+            if ch.get("name", "").startswith("blitz-") and ch.get("name", "").endswith("-deals")
+        ]
+        
+        if not blitz_channels:
+            print("No blitz-*-deals channels found")
+            return "No matching channels found", 404
+        
+        print(f"Found {len(blitz_channels)} blitz-*-deals channels")
+        
+        # Post reminder to each channel
+        reminder_message = "⏰ Reminder to fill out the daily form and spreadsheet with today's deals!"
+        
+        posted_count = 0
+        failed_channels = []
+        
+        for channel in blitz_channels:
+            channel_id = channel["id"]
+            channel_name = channel["name"]
+            
+            try:
+                response = slack_api_post("chat.postMessage", {
+                    "channel": channel_id,
+                    "text": reminder_message
+                })
+                
+                if response.get("ok"):
+                    print(f"✅ Posted reminder to #{channel_name} ({channel_id})")
+                    posted_count += 1
+                else:
+                    error = response.get('error')
+                    print(f"❌ Failed to post to #{channel_name}: {error}")
+                    failed_channels.append(f"{channel_name} ({error})")
+                    
+            except Exception as e:
+                print(f"❌ Exception posting to #{channel_name}: {e}")
+                failed_channels.append(f"{channel_name} (exception)")
+        
+        result_msg = f"Posted to {posted_count}/{len(blitz_channels)} channels"
+        if failed_channels:
+            result_msg += f". Failed: {', '.join(failed_channels)}"
+        
+        return result_msg, 200
+        
+    except Exception as e:
+        print(f"Error in nightly_reminder: {e}")
+        return f"Error: {e}", 500
 
 # -----------------------------
 # Monthly Archive Endpoint
