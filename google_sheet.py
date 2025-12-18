@@ -75,29 +75,6 @@ def _load_all_deals():
 # -----------------------------
 # Time filtering helpers
 # -----------------------------
-def get_period_start(period: str) -> datetime:
-    """
-    Get the start datetime for a period in PST.
-    - today: midnight PST today
-    - week: midnight PST on most recent Monday
-    - month: midnight PST on 1st of current month
-    """
-    now = datetime.now(PST)
-    
-    if period == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    elif period == "week":
-        # Monday = 0, Sunday = 6
-        days_since_monday = now.weekday()
-        monday = now - timedelta(days=days_since_monday)
-        return monday.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    elif period == "month":
-        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    
-    # Default to all time (return very old date)
-    return datetime(2000, 1, 1, tzinfo=PST)
 
 def parse_timestamp(ts_str: str) -> datetime:
     """Parse ISO timestamp string to datetime in PST"""
@@ -115,25 +92,282 @@ def parse_timestamp(ts_str: str) -> datetime:
         # If parsing fails, return old date (will be excluded from "today")
         return datetime(2000, 1, 1, tzinfo=PST)
 
-def filter_deals_by_period(rows: list, period: str) -> list:
-    """Filter deal rows to only include those within the specified period"""
-    period_start = get_period_start(period)
-    filtered = []
+# -----------------------------
+# Date Range Parsing Helpers
+# -----------------------------
+def parse_date_input(date_str: str) -> datetime:
+    """
+    Parse various date formats into datetime (PST).
+    Supports:
+    - MM/DD (assumes current year)
+    - MM/DD/YYYY
+    - "november 15" or "nov 15"
+    - "december 1 2024"
+    """
+    date_str = date_str.strip().lower()
+    now = datetime.now(PST)
     
-    for row in rows:
+    # Try MM/DD or MM/DD/YYYY format
+    if "/" in date_str:
+        parts = date_str.split("/")
+        try:
+            month = int(parts[0])
+            day = int(parts[1])
+            year = int(parts[2]) if len(parts) == 3 else now.year
+            return PST.localize(datetime(year, month, day, 0, 0, 0))
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid date format: {date_str}")
+    
+    # Try month name format (e.g., "november 15" or "nov 15 2024")
+    month_names = {
+        'january': 1, 'jan': 1,
+        'february': 2, 'feb': 2,
+        'march': 3, 'mar': 3,
+        'april': 4, 'apr': 4,
+        'may': 5,
+        'june': 6, 'jun': 6,
+        'july': 7, 'jul': 7,
+        'august': 8, 'aug': 8,
+        'september': 9, 'sep': 9, 'sept': 9,
+        'october': 10, 'oct': 10,
+        'november': 11, 'nov': 11,
+        'december': 12, 'dec': 12
+    }
+    
+    parts = date_str.split()
+    if len(parts) >= 2:
+        month_str = parts[0]
+        if month_str in month_names:
+            try:
+                month = month_names[month_str]
+                day = int(parts[1])
+                year = int(parts[2]) if len(parts) >= 3 else now.year
+                return PST.localize(datetime(year, month, day, 0, 0, 0))
+            except (ValueError, IndexError):
+                pass
+    
+    raise ValueError(f"Could not parse date: {date_str}")
+
+def parse_date_range(range_str: str) -> tuple:
+    """
+    Parse date range string like "12/1 to 12/15" or "november 1 to november 15"
+    Returns (start_datetime, end_datetime) in PST
+    """
+    range_str = range_str.lower().strip()
+    
+    # Split on " to "
+    if " to " not in range_str:
+        raise ValueError("Date range must use format: [start date] to [end date]")
+    
+    parts = range_str.split(" to ")
+    if len(parts) != 2:
+        raise ValueError("Date range must use format: [start date] to [end date]")
+    
+    start_date = parse_date_input(parts[0])
+    end_date = parse_date_input(parts[1])
+    
+    # Set end_date to end of day (23:59:59)
+    end_date = end_date.replace(hour=23, minute=59, second=59)
+    
+    if start_date > end_date:
+        raise ValueError("Start date must be before end date")
+    
+    return start_date, end_date
+
+def format_date_range_label(start_date: datetime, end_date: datetime) -> str:
+    """
+    Format a date range for display in leaderboard headers.
+    Examples:
+    - Same day: "December 17, 2024"
+    - Same month: "Dec 1-15, 2024"
+    - Different months: "Nov 25 - Dec 5, 2024"
+    - Different years: "Dec 20, 2024 - Jan 5, 2025"
+    """
+    if start_date.date() == end_date.date():
+        # Same day
+        return start_date.strftime("%B %d, %Y")
+    
+    if start_date.year == end_date.year:
+        if start_date.month == end_date.month:
+            # Same month
+            return f"{start_date.strftime('%b')} {start_date.day}-{end_date.day}, {start_date.year}"
+        else:
+            # Different months, same year
+            return f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}"
+    else:
+        # Different years
+        return f"{start_date.strftime('%b %d, %Y')} - {end_date.strftime('%b %d, %Y')}"
+
+# -----------------------------
+# Archive Sheet Access
+# -----------------------------
+def _get_archived_sheet(year: int, month: int):
+    """
+    Get an archived deals sheet by year and month.
+    Returns worksheet object or None if not found.
+    """
+    sh = _get_spreadsheet()
+    archive_name = f"deals-{year}-{month:02d}"
+    try:
+        return sh.worksheet(archive_name)
+    except gspread.WorksheetNotFound:
+        return None
+
+def _load_deals_from_date_range(start_date: datetime, end_date: datetime) -> list:
+    """
+    Load all deals within a date range, querying archived sheets as needed.
+    Returns list of deal records.
+    """
+    all_deals = []
+    
+    # Determine which months we need to query
+    current_month_start = datetime.now(PST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    # If range is entirely in current month, just query main sheet
+    if start_date >= current_month_start:
+        ws = _get_sheet()
+        rows = ws.get_all_records()
+        all_deals.extend(rows)
+    else:
+        # Need to query archived sheets
+        # Generate list of (year, month) tuples to query
+        months_to_query = []
+        current = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        while current <= end_date:
+            months_to_query.append((current.year, current.month))
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+        
+        # Query each month's sheet
+        for year, month in months_to_query:
+            if year == current_month_start.year and month == current_month_start.month:
+                # Current month - use main sheet
+                ws = _get_sheet()
+                rows = ws.get_all_records()
+                all_deals.extend(rows)
+            else:
+                # Archived month
+                ws = _get_archived_sheet(year, month)
+                if ws:
+                    rows = ws.get_all_records()
+                    all_deals.extend(rows)
+    
+    # Filter to exact date range
+    filtered = []
+    for row in all_deals:
         ts_str = row.get("timestamp", "")
         row_time = parse_timestamp(ts_str)
-        if row_time >= period_start:
+        if start_date <= row_time <= end_date:
             filtered.append(row)
     
     return filtered
 
+def get_period_start_end(period: str) -> tuple:
+    """
+    Get the start and end datetime for a period in PST.
+    Returns (start_datetime, end_datetime)
+    
+    Periods:
+    - today: midnight today to now
+    - yesterday: midnight yesterday to 23:59:59 yesterday
+    - week: midnight Monday to now
+    - last week: midnight previous Monday to Sunday 23:59:59
+    - month: midnight 1st of month to now
+    - last month: midnight 1st of previous month to last day 23:59:59
+    """
+    now = datetime.now(PST)
+    
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, now
+    
+    elif period == "yesterday":
+        yesterday = now - timedelta(days=1)
+        start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return start, end
+    
+    elif period == "week":
+        # Current week: Monday to now
+        days_since_monday = now.weekday()
+        monday = now - timedelta(days=days_since_monday)
+        start = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, now
+    
+    elif period == "last week":
+        # Previous complete week: Monday to Sunday
+        days_since_monday = now.weekday()
+        this_monday = now - timedelta(days=days_since_monday)
+        last_monday = this_monday - timedelta(days=7)
+        last_sunday = this_monday - timedelta(days=1)
+        start = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = last_sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return start, end
+    
+    elif period == "month":
+        # Current month: 1st to now
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start, now
+    
+    elif period == "last month":
+        # Previous complete month
+        first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        last_day_of_last_month = first_of_this_month - timedelta(days=1)
+        first_of_last_month = last_day_of_last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = last_day_of_last_month.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return first_of_last_month, end
+    
+    # Default to all time
+    return datetime(2000, 1, 1, tzinfo=PST), now
+
+def get_period_label(period: str, start_date: datetime = None, end_date: datetime = None) -> str:
+    """
+    Return human-readable label for period.
+    If start_date and end_date provided, format them nicely.
+    """
+    if start_date and end_date:
+        return format_date_range_label(start_date, end_date)
+    
+    if period == "today":
+        return "Today"
+    elif period == "yesterday":
+        return "Yesterday"
+    elif period == "week":
+        return "This Week"
+    elif period == "last week":
+        start, end = get_period_start_end("last week")
+        return format_date_range_label(start, end)
+    elif period == "month":
+        return "This Month"
+    elif period == "last month":
+        start, end = get_period_start_end("last month")
+        return start.strftime("%B %Y")
+    
+    return ""
+
 # -----------------------------
 # Channel leaderboard (with period filter)
 # -----------------------------
-def get_channel_leaderboard(channel_name: str, period: str = "today") -> str:
-    rows = _load_all_deals()
-    rows = filter_deals_by_period(rows, period)
+# -----------------------------
+# Channel leaderboard (with period or date range)
+# -----------------------------
+def get_channel_leaderboard(channel_name: str, period: str = "today", date_range: tuple = None) -> tuple:
+    """
+    Get channel leaderboard for a period or custom date range.
+    Returns (leaderboard_text, period_label)
+    """
+    if date_range:
+        start_date, end_date = date_range
+        rows = _load_deals_from_date_range(start_date, end_date)
+        period_label = format_date_range_label(start_date, end_date)
+    else:
+        start_date, end_date = get_period_start_end(period)
+        rows = _load_deals_from_date_range(start_date, end_date)
+        period_label = get_period_label(period, start_date, end_date)
     
     totals = defaultdict(int)
     for row in rows:
@@ -143,7 +377,7 @@ def get_channel_leaderboard(channel_name: str, period: str = "today") -> str:
             totals[user] += deals
 
     if not totals:
-        return ""
+        return "", period_label
 
     sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
     
@@ -159,13 +393,26 @@ def get_channel_leaderboard(channel_name: str, period: str = "today") -> str:
     lines.append("─────────────")
     lines.append(f"Total: {total_deals}")
 
-    return "\n".join(lines)
+    return "\n".join(lines), period_label
 # -----------------------------
 # Master leaderboard (with period filter)
 # -----------------------------
-def get_master_leaderboard(period: str = "today") -> str:
-    rows = _load_all_deals()
-    rows = filter_deals_by_period(rows, period)
+# -----------------------------
+# Master leaderboard (with period or date range)
+# -----------------------------
+def get_master_leaderboard(period: str = "today", date_range: tuple = None) -> tuple:
+    """
+    Get master leaderboard for a period or custom date range.
+    Returns (leaderboard_text, period_label)
+    """
+    if date_range:
+        start_date, end_date = date_range
+        rows = _load_deals_from_date_range(start_date, end_date)
+        period_label = format_date_range_label(start_date, end_date)
+    else:
+        start_date, end_date = get_period_start_end(period)
+        rows = _load_deals_from_date_range(start_date, end_date)
+        period_label = get_period_label(period, start_date, end_date)
     
     # Track totals and market breakdown per user
     totals = defaultdict(int)
@@ -179,7 +426,7 @@ def get_master_leaderboard(period: str = "today") -> str:
         user_markets[user][market] += deals
 
     if not totals:
-        return ""
+        return "", period_label
 
     sorted_rows = sorted(totals.items(), key=lambda x: x[1], reverse=True)
 
@@ -187,8 +434,8 @@ def get_master_leaderboard(period: str = "today") -> str:
     rank = 1
     total_deals = 0
     for user, deals in sorted_rows:
-        # Show market for daily/weekly, not for monthly
-        if period in ("today", "week"):
+        # Show market for daily/weekly/custom ranges, not for monthly
+        if period in ("today", "yesterday", "week", "last week") or date_range:
             markets = user_markets[user]
             primary_market = max(markets, key=markets.get).title()
             lines.append(f"{rank}. {user} ({primary_market}) — {deals}")
@@ -201,8 +448,8 @@ def get_master_leaderboard(period: str = "today") -> str:
     lines.append("─────────────")
     lines.append(f"Total: {total_deals}")
 
-    return "\n".join(lines)
-
+    return "\n".join(lines), period_label
+    
 # -----------------------------
 # Current Week helpers (for weekly auto-post on Sunday)
 # -----------------------------
