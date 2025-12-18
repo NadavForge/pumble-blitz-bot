@@ -360,7 +360,7 @@ REMINDER_SECRET = os.environ.get("REMINDER_SECRET", "")
 # Comma-separated list of channel IDs to send reminders to
 REMINDER_CHANNEL_IDS = os.environ.get("REMINDER_CHANNEL_IDS", "")
 
-@@app.route("/nightly-reminder", methods=["GET", "POST"])
+@app.route("/nightly-reminder", methods=["GET", "POST"])
 def nightly_reminder():
     """
     Endpoint for external cron job to send nightly reminders to all blitz-*-deals channels.
