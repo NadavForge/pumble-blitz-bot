@@ -149,12 +149,17 @@ def get_channel_leaderboard(channel_name: str, period: str = "today") -> str:
     
     lines = []
     rank = 1
+    total_deals = 0
     for user, deals in sorted_rows:
         lines.append(f"{rank}. {user} — {deals}")
+        total_deals += deals
         rank += 1
+    
+    # Add total count at bottom
+    lines.append("─────────────")
+    lines.append(f"Total: {total_deals} deals")
 
     return "\n".join(lines)
-
 # -----------------------------
 # Master leaderboard (with period filter)
 # -----------------------------
@@ -180,6 +185,7 @@ def get_master_leaderboard(period: str = "today") -> str:
 
     lines = []
     rank = 1
+    total_deals = 0
     for user, deals in sorted_rows:
         # Show market for daily/weekly, not for monthly
         if period in ("today", "week"):
@@ -188,7 +194,12 @@ def get_master_leaderboard(period: str = "today") -> str:
             lines.append(f"{rank}. {user} ({primary_market}) — {deals}")
         else:
             lines.append(f"{rank}. {user} — {deals}")
+        total_deals += deals
         rank += 1
+    
+    # Add total count at bottom
+    lines.append("─────────────")
+    lines.append(f"Total: {total_deals} deals")
 
     return "\n".join(lines)
 
