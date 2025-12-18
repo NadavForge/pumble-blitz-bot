@@ -582,7 +582,16 @@ def remove_last_deal(user_name: str, channel_name: str) -> tuple:
     ws.delete_rows(row_idx)
     
     deals_count = int(deal_to_remove.get("deals", 1))
-    gb_size = float(deal_to_remove.get("package_size_gb", 0))
+
+# Handle empty or missing package_size_gb
+gb_value = deal_to_remove.get("package_size_gb", 0)
+if gb_value == "" or gb_value is None:
+    gb_size = 0.0
+else:
+    try:
+        gb_size = float(gb_value)
+    except (ValueError, TypeError):
+        gb_size = 0.0
     
     return (True, "", deals_count, gb_size)
     
