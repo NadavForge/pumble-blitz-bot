@@ -303,7 +303,7 @@ def slack_events():
                 if leaderboard_text:
                     header = f"*Leaderboard – {market} ({period_label})*\n{leaderboard_text}"
                 else:
-                    header = f"No deals logged yet for {market} ({period_label.lower()})."
+                    header = f"No deals logged yet for {market} ({period_label})."
                 send_message(channel_id, header)
                 
             except ValueError as e:
@@ -325,7 +325,7 @@ def slack_events():
                 if leaderboard_text:
                     header = f"*Master Leaderboard – All Markets ({period_label})*\n{leaderboard_text}"
                 else:
-                    header = f"No deals logged yet ({period_label.lower()})."
+                    header = f"No deals logged yet ({period_label})."
                 send_message(channel_id, header)
                 
             except ValueError as e:
