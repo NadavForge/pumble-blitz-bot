@@ -394,7 +394,7 @@ def slack_events():
             error_msg = f"❌ I didn't understand that leaderboard command.\n\nSupported commands:\n• `leaderboard` or `leaderboard today`\n• `leaderboard yesterday`\n• `leaderboard week` or `leaderboard last week`\n• `leaderboard month` or `leaderboard last month`\n• `leaderboard 12/1 to 12/15`\n\nSame formats work with `master leaderboard`"
             send_message(channel_id, error_msg)
 
-    return "ok", 200
+        return "ok", 200
 
         # -----------------------------
         # 3) REMOVE DEAL COMMAND
