@@ -157,7 +157,7 @@ def get_channel_leaderboard(channel_name: str, period: str = "today") -> str:
     
     # Add total count at bottom
     lines.append("─────────────")
-    lines.append(f"Total: {total_deals} deals")
+    lines.append(f"Total: {total_deals}")
 
     return "\n".join(lines)
 # -----------------------------
@@ -199,7 +199,7 @@ def get_master_leaderboard(period: str = "today") -> str:
     
     # Add total count at bottom
     lines.append("─────────────")
-    lines.append(f"Total: {total_deals} deals")
+    lines.append(f"Total: {total_deals}")
 
     return "\n".join(lines)
 
