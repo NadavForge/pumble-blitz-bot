@@ -128,51 +128,77 @@ def is_deal_message(text):
 # -----------------------------
 def parse_leaderboard_command(text):
     """
-    Parse leaderboard commands and return (command_type, period)
+    Parse leaderboard commands and return (command_type, period, date_range)
     
     Commands:
-      leaderboard           -> ("channel", "today")
-      leaderboard today     -> ("channel", "today")
-      leaderboard week      -> ("channel", "week")
-      leaderboard month     -> ("channel", "month")
-      master leaderboard    -> ("master", "today")
-      master leaderboard today  -> ("master", "today")
-      master leaderboard week   -> ("master", "week")
-      master leaderboard month  -> ("master", "month")
+      leaderboard                    -> ("channel", "today", None)
+      leaderboard today              -> ("channel", "today", None)
+      leaderboard yesterday          -> ("channel", "yesterday", None)
+      leaderboard week               -> ("channel", "week", None)
+      leaderboard last week          -> ("channel", "last week", None)
+      leaderboard month              -> ("channel", "month", None)
+      leaderboard last month         -> ("channel", "last month", None)
+      leaderboard 12/1 to 12/15      -> ("channel", None, "12/1 to 12/15")
+      
+      master leaderboard             -> ("master", "today", None)
+      master leaderboard yesterday   -> ("master", "yesterday", None)
+      master leaderboard last week   -> ("master", "last week", None)
+      master leaderboard last month  -> ("master", "last month", None)
+      master leaderboard 12/1 to 12/15 -> ("master", None, "12/1 to 12/15")
     """
     lower = text.lower().strip()
     
     # Master leaderboard variants
     if lower.startswith("master leaderboard"):
         remainder = lower.replace("master leaderboard", "").strip()
-        if remainder == "week":
-            return ("master", "week")
+        
+        # Check for date range (contains "to")
+        if " to " in remainder:
+            return ("master", None, remainder)
+        
+        # Check for named periods
+        if remainder == "yesterday":
+            return ("master", "yesterday", None)
+        elif remainder == "week":
+            return ("master", "week", None)
+        elif remainder == "last week":
+            return ("master", "last week", None)
         elif remainder == "month":
-            return ("master", "month")
+            return ("master", "month", None)
+        elif remainder == "last month":
+            return ("master", "last month", None)
+        elif remainder == "today" or remainder == "":
+            return ("master", "today", None)
         else:
-            return ("master", "today")
+            # Unknown period - return None to trigger error message
+            return (None, None, None)
     
     # Channel leaderboard variants
     if lower.startswith("leaderboard"):
         remainder = lower.replace("leaderboard", "").strip()
-        if remainder == "week":
-            return ("channel", "week")
+        
+        # Check for date range (contains "to")
+        if " to " in remainder:
+            return ("channel", None, remainder)
+        
+        # Check for named periods
+        if remainder == "yesterday":
+            return ("channel", "yesterday", None)
+        elif remainder == "week":
+            return ("channel", "week", None)
+        elif remainder == "last week":
+            return ("channel", "last week", None)
         elif remainder == "month":
-            return ("channel", "month")
+            return ("channel", "month", None)
+        elif remainder == "last month":
+            return ("channel", "last month", None)
+        elif remainder == "today" or remainder == "":
+            return ("channel", "today", None)
         else:
-            return ("channel", "today")
+            # Unknown period - return None to trigger error message
+            return (None, None, None)
     
-    return (None, None)
-
-def get_period_label(period):
-    """Return human-readable label for period"""
-    if period == "today":
-        return "Today"
-    elif period == "week":
-        return "This Week"
-    elif period == "month":
-        return "This Month"
-    return ""
+    return (None, None, None)
 
 # -----------------------------
 # ROUTING
@@ -259,31 +285,61 @@ def slack_events():
         # -----------------------------
         # 2) LEADERBOARD COMMANDS
         # -----------------------------
-        command_type, period = parse_leaderboard_command(text)
+        command_type, period, date_range_str = parse_leaderboard_command(text)
         
         if command_type == "channel":
-            market = channel_name.lower().replace("blitz-", "").replace("-deals", "").title()
-            period_label = get_period_label(period)
+            from google_sheet import get_channel_leaderboard, parse_date_range
             
-            leaderboard_text = get_channel_leaderboard(channel_name, period)
-            if leaderboard_text:
-                header = f"*Leaderboard – {market} ({period_label})*\n{leaderboard_text}"
-            else:
-                header = f"No deals logged yet for {market} ({period_label.lower()})."
-            send_message(channel_id, header)
+            market = channel_name.lower().replace("blitz-", "").replace("-deals", "").title()
+            
+            try:
+                # Handle date range or period
+                if date_range_str:
+                    date_range = parse_date_range(date_range_str)
+                    leaderboard_text, period_label = get_channel_leaderboard(channel_name, date_range=date_range)
+                else:
+                    leaderboard_text, period_label = get_channel_leaderboard(channel_name, period)
+                
+                if leaderboard_text:
+                    header = f"*Leaderboard – {market} ({period_label})*\n{leaderboard_text}"
+                else:
+                    header = f"No deals logged yet for {market} ({period_label.lower()})."
+                send_message(channel_id, header)
+                
+            except ValueError as e:
+                # Date parsing error
+                error_msg = f"❌ Invalid date format: {str(e)}\n\nSupported formats:\n• `leaderboard yesterday`\n• `leaderboard last week`\n• `leaderboard last month`\n• `leaderboard 12/1 to 12/15`\n• `leaderboard november 1 to november 15`"
+                send_message(channel_id, error_msg)
         
         elif command_type == "master":
-            period_label = get_period_label(period)
+            from google_sheet import get_master_leaderboard, parse_date_range
             
-            leaderboard_text = get_master_leaderboard(period)
-            if leaderboard_text:
-                header = f"*Master Leaderboard – All Markets ({period_label})*\n{leaderboard_text}"
-            else:
-                header = f"No deals logged yet ({period_label.lower()})."
-            send_message(channel_id, header)
+            try:
+                # Handle date range or period
+                if date_range_str:
+                    date_range = parse_date_range(date_range_str)
+                    leaderboard_text, period_label = get_master_leaderboard(date_range=date_range)
+                else:
+                    leaderboard_text, period_label = get_master_leaderboard(period)
+                
+                if leaderboard_text:
+                    header = f"*Master Leaderboard – All Markets ({period_label})*\n{leaderboard_text}"
+                else:
+                    header = f"No deals logged yet ({period_label.lower()})."
+                send_message(channel_id, header)
+                
+            except ValueError as e:
+                # Date parsing error
+                error_msg = f"❌ Invalid date format: {str(e)}\n\nSupported formats:\n• `master leaderboard yesterday`\n• `master leaderboard last week`\n• `master leaderboard last month`\n• `master leaderboard 12/1 to 12/15`\n• `master leaderboard november 1 to november 15`"
+                send_message(channel_id, error_msg)
+        
+        elif command_type is None and (text.lower().strip().startswith("leaderboard") or text.lower().strip().startswith("master leaderboard")):
+            # User typed a leaderboard command but with invalid syntax
+            error_msg = f"❌ I didn't understand that leaderboard command.\n\nSupported commands:\n• `leaderboard` or `leaderboard today`\n• `leaderboard yesterday`\n• `leaderboard week` or `leaderboard last week`\n• `leaderboard month` or `leaderboard last month`\n• `leaderboard 12/1 to 12/15`\n\nSame formats work with `master leaderboard`"
+            send_message(channel_id, error_msg)
 
     return "ok", 200
-
+    
 # -----------------------------
 # Debug/Test Routes
 # -----------------------------
@@ -359,7 +415,7 @@ def daily_leaderboard():
         print("Error: LEADERBOARD_CHANNEL_ID not set")
         return "LEADERBOARD_CHANNEL_ID not configured", 500
     
-    leaderboard_text = get_master_leaderboard("today")
+    leaderboard_text, period_label = get_master_leaderboard("today")
     if not leaderboard_text:
         leaderboard_text = "No deals logged today."
     
