@@ -110,19 +110,52 @@ def send_message(channel, text):
 
 # -----------------------------
 # Deal detection pattern
-# Matches: 1g, 2G, 1gb, 1GB, 1gig, 2gigs, "1g too easy", etc.
+# Matches packages: 200mb, 500mb, 1g, 2g, 5g, 8g (with variations)
 # -----------------------------
-DEAL_PATTERN = re.compile(r"\b[1-9]\s*(g|gb|gig)s?\b", re.IGNORECASE)
+DEAL_PATTERN = re.compile(
+    r"\b(200|500)\s*(mb|m)\b|\b([1258])\s*(g|gb|gig)s?\b", 
+    re.IGNORECASE
+)
+
+def parse_deal_from_message(text):
+    """
+    Parse deal message and return (deal_count, package_size_gb)
+    
+    Examples:
+    - "1g" -> (1, 1.0)
+    - "2G sold!" -> (1, 2.0)
+    - "200mb" -> (1, 0.2)
+    - "5gig easy" -> (1, 5.0)
+    
+    Returns (deal_count, package_size_gb) or (0, 0) if no match
+    """
+    if not text:
+        return (0, 0)
+    
+    match = DEAL_PATTERN.search(text)
+    if not match:
+        return (0, 0)
+    
+    # Check if it's MB (200mb or 500mb)
+    if match.group(1):  # MB size (200 or 500)
+        mb_size = int(match.group(1))
+        gb_size = mb_size / 1000  # Convert MB to GB
+        return (1, gb_size)
+    
+    # Otherwise it's GB (1g, 2g, 5g, 8g)
+    if match.group(3):  # GB size (1, 2, 5, or 8)
+        gb_size = int(match.group(3))
+        return (1, gb_size)
+    
+    return (0, 0)
 
 def is_deal_message(text):
     """
     Returns True if text contains a deal-style message.
-    Every valid deal message = exactly 1 deal (per spec).
     """
-    if not text:
-        return False
-    return bool(DEAL_PATTERN.search(text))
-
+    deal_count, _ = parse_deal_from_message(text)
+    return deal_count > 0
+    
 # -----------------------------
 # Parse leaderboard commands
 # -----------------------------
@@ -269,19 +302,22 @@ def slack_events():
         # -----------------------------
         # 1) DEAL DETECTION LOGIC
         # -----------------------------
-        if is_deal_message(text) and is_deal_channel and user_id:
+        deal_count, package_size_gb = parse_deal_from_message(text)
+        
+        if deal_count > 0 and is_deal_channel and user_id:
             user_name = get_user_name(user_id)
             timestamp = datetime.now(PST).isoformat()
 
             append_deal(
                 user_name=user_name,
                 channel_name=channel_name,
-                deals=1,
+                deals=deal_count,
+                package_size_gb=package_size_gb,
                 timestamp=timestamp
             )
-            print(f"Logged 1 deal for {user_name} in {channel_name}")
-            send_message(channel_id, f"✅ Deal logged for {user_name}!")
-
+            print(f"Logged {deal_count} deal ({package_size_gb}GB) for {user_name} in {channel_name}")
+            send_message(channel_id, f"✅ Deal logged for {user_name}! ({package_size_gb}GB)")
+            
         # -----------------------------
         # 2) LEADERBOARD COMMANDS
         # -----------------------------
