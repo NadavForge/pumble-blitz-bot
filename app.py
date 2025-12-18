@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import re
+from collections import deque
 from datetime import datetime, timezone, timedelta
 import pytz
 
@@ -46,6 +47,11 @@ else:
 # -----------------------------
 USER_CACHE = {}
 CHANNEL_CACHE = {}
+
+# -----------------------------
+# Deduplication cache for preventing duplicate deal logs
+# -----------------------------
+RECENT_MESSAGES = deque(maxlen=200)  # Keep last 200 messages in memory
 
 # -----------------------------
 # Helper to call Slack API
@@ -212,6 +218,20 @@ def slack_events():
         channel_name = get_channel_name(channel_id)
         is_deal_channel = channel_name.lower().endswith("-deals")
 
+        # -----------------------------
+        # DEDUPLICATION CHECK
+        # -----------------------------
+        message_ts = event.get("ts")  # Slack's unique timestamp for this message
+        message_id = (user_id, message_ts, channel_id)
+        
+        if message_id in RECENT_MESSAGES:
+            user_name = get_user_name(user_id)
+            print(f"⚠️ DUPLICATE DETECTED - User: {user_name}, Channel: {channel_name}, Timestamp: {message_ts}")
+            return "ok", 200
+        
+        # Add to cache to prevent future duplicates
+        RECENT_MESSAGES.append(message_id)
+        
         # -----------------------------
         # 1) DEAL DETECTION LOGIC
         # -----------------------------
