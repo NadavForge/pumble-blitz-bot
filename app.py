@@ -11,6 +11,7 @@ from google_sheet import (
     get_master_leaderboard,
     get_channel_leaderboard,
     archive_and_reset_monthly
+    remove_last_deal
 )
 
 # -----------------------------
@@ -234,6 +235,25 @@ def parse_leaderboard_command(text):
     return (None, None, None)
 
 # -----------------------------
+# Parse remove commands
+# -----------------------------
+def parse_remove_command(text):
+    """
+    Parse remove command and return True if it matches "!remove last deal"
+    
+    Command:
+      !remove last deal          -> True
+    
+    Returns True or False
+    """
+    lower = text.lower().strip()
+    
+    if lower == "!remove last deal" or lower == "!remove":
+        return True
+    
+    return False
+
+# -----------------------------
 # ROUTING
 # -----------------------------
 @app.route("/")
@@ -375,7 +395,26 @@ def slack_events():
             send_message(channel_id, error_msg)
 
     return "ok", 200
-    
+
+        # -----------------------------
+        # 3) REMOVE DEAL COMMAND
+        # -----------------------------
+        if parse_remove_command(text) and is_deal_channel and user_id:
+            from google_sheet import remove_last_deal
+            
+            user_name = get_user_name(user_id)
+            
+            success, error_msg, deals_removed, gb_removed = remove_last_deal(
+                user_name=user_name,
+                channel_name=channel_name
+            )
+            
+            if success:
+                send_message(channel_id, f"✅ Removed {deals_removed} deal ({gb_removed}GB) for {user_name}")
+                print(f"Removed {deals_removed} deal ({gb_removed}GB) for {user_name} in {channel_name}")
+            else:
+                send_message(channel_id, error_msg)
+                
 # -----------------------------
 # Debug/Test Routes
 # -----------------------------
