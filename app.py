@@ -10,7 +10,7 @@ from google_sheet import (
     append_deal,
     get_master_leaderboard,
     get_channel_leaderboard,
-    archive_and_reset_monthly
+    archive_and_reset_monthly,
     remove_last_deal
 )
 
