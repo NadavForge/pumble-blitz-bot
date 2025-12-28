@@ -49,11 +49,26 @@ def _get_sheet():
 # Auto-detect market
 # -----------------------------
 def extract_market(channel_name: str) -> str:
+    """
+    Extract market name from channel.
+    Examples:
+    - blitz-socal -> socal
+    - blitz-socal-vets -> socal
+    - blitz-utah-area -> utah
+    """
     if not channel_name:
         return "unknown"
+    
     parts = channel_name.lower().split("-")
-    if len(parts) >= 3 and parts[0] == "blitz" and parts[-1] == "deals":
+    
+    # Must start with "blitz"
+    if parts[0] != "blitz":
+        return "unknown"
+    
+    # Return the market name (second part)
+    if len(parts) >= 2:
         return parts[1]
+    
     return "unknown"
 
 # -----------------------------
