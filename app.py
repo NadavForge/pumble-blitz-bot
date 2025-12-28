@@ -545,10 +545,11 @@ def nightly_reminder():
         
         all_channels = result.get("channels", [])
         
-        # Filter for blitz-*-deals channels
+        # Send reminders only to main market channels (blitz-[market] with no suffix)
         blitz_channels = [
             ch for ch in all_channels 
-            if ch.get("name", "").startswith("blitz-") and ch.get("name", "").endswith("-deals")
+            if (ch.get("name", "").startswith("blitz-") and 
+                "-" not in ch.get("name", "")[6:])  # No additional hyphens after "blitz-"
         ]
         
         if not blitz_channels:
