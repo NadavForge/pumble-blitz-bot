@@ -303,7 +303,12 @@ def slack_events():
         channel_id = event.get("channel")
 
         channel_name = get_channel_name(channel_id)
-        is_deal_channel = channel_name.lower().endswith("-deals")
+        # Main market channels (blitz-[market] with no suffix)
+        channel_lower = channel_name.lower()
+        is_deal_channel = (
+            channel_lower.startswith("blitz-") and 
+            "-" not in channel_lower[6:]  # No additional hyphens after "blitz-"
+        )
 
         # -----------------------------
         # DEDUPLICATION CHECK
@@ -346,7 +351,10 @@ def slack_events():
         if command_type == "channel":
             from google_sheet import get_channel_leaderboard, parse_date_range
             
-            market = channel_name.lower().replace("blitz-", "").replace("-deals", "").title()
+            # Extract market name (everything between "blitz-" and first hyphen, if any)
+            channel_lower = channel_name.lower().replace("blitz-", "")
+            market_name = channel_lower.split("-")[0]  # Get first part before any hyphen
+            market = market_name.title()    
             
             try:
                 # Handle date range or period
