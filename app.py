@@ -191,8 +191,45 @@ def parse_leaderboard_command(text):
       master leaderboard last month  -> ("master", "last month", None)
       master leaderboard 12/1 to 12/15 -> ("master", None, "12/1 to 12/15")
       master leaderboard 12/15       -> ("master", None, "12/15")  # single date
+      
+      team leaderboard               -> ("team", "today", None)
+      team leaderboard yesterday     -> ("team", "yesterday", None)
+      team leaderboard week          -> ("team", "week", None)
+      team leaderboard last week     -> ("team", "last week", None)
+      team leaderboard month         -> ("team", "month", None)
+      team leaderboard last month    -> ("team", "last month", None)
+      team leaderboard 12/1 to 12/15 -> ("team", None, "12/1 to 12/15")
     """
     lower = text.lower().strip()
+    
+    # Team leaderboard variants
+    if lower.startswith("team leaderboard"):
+        remainder = lower.replace("team leaderboard", "").strip()
+        
+        # Check for date range (contains "to")
+        if " to " in remainder:
+            return ("team", None, remainder)
+        
+        # Check if it looks like a date
+        if "/" in remainder or any(month in remainder for month in ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
+            return ("team", None, remainder)
+        
+        # Check for named periods
+        if remainder == "yesterday":
+            return ("team", "yesterday", None)
+        elif remainder == "week":
+            return ("team", "week", None)
+        elif remainder == "last week":
+            return ("team", "last week", None)
+        elif remainder == "month":
+            return ("team", "month", None)
+        elif remainder == "last month":
+            return ("team", "last month", None)
+        elif remainder == "today" or remainder == "":
+            return ("team", "today", None)
+        else:
+            # Unknown period
+            return (None, None, None)
     
     # Master leaderboard variants
     if lower.startswith("master leaderboard"):
@@ -459,9 +496,31 @@ def slack_events():
                 error_msg = f"❌ Invalid date format: {str(e)}\n\nSupported formats:\n• `master leaderboard yesterday`\n• `master leaderboard last week`\n• `master leaderboard last month`\n• `master leaderboard 12/1 to 12/15`\n• `master leaderboard november 1 to november 15`"
                 send_message(channel_id, error_msg)
         
-        elif command_type is None and (text.lower().strip().startswith("leaderboard") or text.lower().strip().startswith("master leaderboard")):
+        elif command_type == "team":
+            from google_sheet import get_team_leaderboard, parse_date_range
+            
+            try:
+                # Handle date range or period
+                if date_range_str:
+                    date_range = parse_date_range(date_range_str)
+                    leaderboard_text, period_label = get_team_leaderboard(date_range=date_range)
+                else:
+                    leaderboard_text, period_label = get_team_leaderboard(period)
+                
+                if leaderboard_text:
+                    header = f"*Team Leaderboard – All Markets ({period_label})*\n{leaderboard_text}"
+                else:
+                    header = f"No deals logged yet ({period_label})."
+                send_message(channel_id, header)
+                
+            except ValueError as e:
+                # Date parsing error
+                error_msg = f"❌ Invalid date format: {str(e)}\n\nSupported formats:\n• `team leaderboard yesterday`\n• `team leaderboard last week`\n• `team leaderboard last month`\n• `team leaderboard 12/1 to 12/15`\n• `team leaderboard november 1 to november 15`"
+                send_message(channel_id, error_msg)
+        
+        elif command_type is None and (text.lower().strip().startswith("leaderboard") or text.lower().strip().startswith("master leaderboard") or text.lower().strip().startswith("team leaderboard")):
             # User typed a leaderboard command but with invalid syntax
-            error_msg = f"❌ I didn't understand that leaderboard command.\n\nSupported commands:\n• `leaderboard` or `leaderboard today`\n• `leaderboard yesterday`\n• `leaderboard week` or `leaderboard last week`\n• `leaderboard month` or `leaderboard last month`\n• `leaderboard 12/1 to 12/15`\n\nSame formats work with `master leaderboard`"
+            error_msg = f"❌ I didn't understand that leaderboard command.\n\nSupported commands:\n• `leaderboard` or `leaderboard today`\n• `leaderboard yesterday`\n• `leaderboard week` or `leaderboard last week`\n• `leaderboard month` or `leaderboard last month`\n• `leaderboard 12/1 to 12/15`\n\nSame formats work with `master leaderboard` and `team leaderboard`"
             send_message(channel_id, error_msg)
 
         # -----------------------------
