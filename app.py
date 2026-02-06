@@ -206,8 +206,8 @@ def parse_leaderboard_command(text):
     if lower.startswith("team leaderboard"):
         remainder = lower.replace("team leaderboard", "").strip()
         
-        # Check for date range (contains "to")
-        if " to " in remainder:
+        # Check for date range (contains "to" or "-")
+        if " to " in remainder or " - " in remainder:
             return ("team", None, remainder)
         
         # Check if it looks like a date
@@ -235,8 +235,8 @@ def parse_leaderboard_command(text):
     if lower.startswith("master leaderboard"):
         remainder = lower.replace("master leaderboard", "").strip()
         
-        # Check for date range (contains "to")
-        if " to " in remainder:
+        # Check for date range (contains "to" or "-")
+        if " to " in remainder or " - " in remainder:
             return ("master", None, remainder)
         
         # Check if it looks like a date (contains / or is a month name)
@@ -265,8 +265,8 @@ def parse_leaderboard_command(text):
     if lower.startswith("leaderboard"):
         remainder = lower.replace("leaderboard", "").strip()
         
-        # Check for date range (contains "to")
-        if " to " in remainder:
+        # Check for date range (contains "to" or "-")
+        if " to " in remainder or " - " in remainder:
             return ("channel", None, remainder)
         
         # Check if it looks like a date (contains / or is a month name)
