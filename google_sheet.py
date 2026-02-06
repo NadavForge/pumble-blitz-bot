@@ -42,7 +42,7 @@ def _get_sheet():
         ws = sh.worksheet("deals")
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title="deals", rows="2000", cols="10")
-        ws.append_row(["timestamp", "user_name", "market", "channel_name", "deals", "package_size_gb"])
+        ws.append_row(["timestamp", "user_id", "user_name", "market", "channel_name", "deals", "package_size_gb"])
     return ws
 
 # -----------------------------
@@ -74,10 +74,10 @@ def extract_market(channel_name: str) -> str:
 # -----------------------------
 # Log deals
 # -----------------------------
-def append_deal(user_name: str, channel_name: str, deals: int, package_size_gb: float, timestamp: str):
+def append_deal(user_id: str, user_name: str, channel_name: str, deals: int, package_size_gb: float, timestamp: str):
     ws = _get_sheet()
     market = extract_market(channel_name)
-    ws.append_row([timestamp, user_name, market, channel_name, deals, package_size_gb])
+    ws.append_row([timestamp, user_id, user_name, market, channel_name, deals, package_size_gb])
 
 # -----------------------------
 # Load all deal rows
@@ -426,11 +426,19 @@ def get_channel_leaderboard(channel_name: str, period: str = "today", date_range
         period_label = get_period_label(period, start_date, end_date)
     
     totals = defaultdict(int)
+    user_names = {}  # Map user_id to most recent user_name
+    
     for row in rows:
         if row.get("channel_name") == channel_name:
-            user = row.get("user_name") or "Unknown"
+            user_id = row.get("user_id")
+            user_name = row.get("user_name") or "Unknown"
             deals = int(row.get("deals") or 0)
-            totals[user] += deals
+            
+            # If no user_id (old data), fall back to user_name as key
+            key = user_id if user_id else user_name
+            
+            totals[key] += deals
+            user_names[key] = user_name  # Keep updating to get most recent name
 
     if not totals:
         return "", period_label
@@ -440,8 +448,9 @@ def get_channel_leaderboard(channel_name: str, period: str = "today", date_range
     lines = []
     rank = 1
     total_deals = 0
-    for user, deals in sorted_rows:
-        lines.append(f"{rank}. {user} — {deals}")
+    for user_key, deals in sorted_rows:
+        display_name = user_names.get(user_key, user_key)
+        lines.append(f"{rank}. {display_name} — {deals}")
         total_deals += deals
         rank += 1
     
@@ -473,13 +482,20 @@ def get_master_leaderboard(period: str = "today", date_range: tuple = None) -> t
     # Track totals and market breakdown per user
     totals = defaultdict(int)
     user_markets = defaultdict(lambda: defaultdict(int))
+    user_names = {}  # Map user_id to most recent user_name
     
     for row in rows:
-        user = row.get("user_name") or "Unknown"
+        user_id = row.get("user_id")
+        user_name = row.get("user_name") or "Unknown"
         market = row.get("market") or "unknown"
         deals = int(row.get("deals") or 0)
-        totals[user] += deals
-        user_markets[user][market] += deals
+        
+        # If no user_id (old data), fall back to user_name as key
+        key = user_id if user_id else user_name
+        
+        totals[key] += deals
+        user_markets[key][market] += deals
+        user_names[key] = user_name  # Keep updating to get most recent name
 
     if not totals:
         return "", period_label
@@ -489,14 +505,16 @@ def get_master_leaderboard(period: str = "today", date_range: tuple = None) -> t
     lines = []
     rank = 1
     total_deals = 0
-    for user, deals in sorted_rows:
+    for user_key, deals in sorted_rows:
+        display_name = user_names.get(user_key, user_key)
+        
         # Show market for daily/weekly/custom ranges, not for monthly
         if period in ("today", "yesterday", "week", "last week") or date_range:
-            markets = user_markets[user]
+            markets = user_markets[user_key]
             primary_market = max(markets, key=markets.get).title()
-            lines.append(f"{rank}. {user} ({primary_market}) — {deals}")
+            lines.append(f"{rank}. {display_name} ({primary_market}) — {deals}")
         else:
-            lines.append(f"{rank}. {user} — {deals}")
+            lines.append(f"{rank}. {display_name} — {deals}")
         total_deals += deals
         rank += 1
     
@@ -576,16 +594,17 @@ def _get_deletions_sheet():
         ws = sh.worksheet("deletions")
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title="deletions", rows="1000", cols="10")
-        ws.append_row(["deletion_timestamp", "user_name", "original_timestamp", "market", "channel_name", "deals", "package_size_gb"])
+        ws.append_row(["deletion_timestamp", "user_id", "user_name", "original_timestamp", "market", "channel_name", "deals", "package_size_gb"])
     return ws
 
-def remove_last_deal(user_name: str, channel_name: str, deal_type_gb: float = None) -> tuple:
+def remove_last_deal(user_id: str, user_name: str, channel_name: str, deal_type_gb: float = None) -> tuple:
     """
     Remove the most recent deal for a user from today only.
     Optionally filter by deal type.
     
     Args:
-        user_name: Name of the user
+        user_id: Slack user ID (primary matching key)
+        user_name: Name of the user (fallback for old data)
         channel_name: Channel where deal was logged
         deal_type_gb: Optional - specific deal size to remove (e.g., 1.0 for 1g, 0.5 for 500mb)
                      If None, removes most recent deal of any type
@@ -606,8 +625,19 @@ def remove_last_deal(user_name: str, channel_name: str, deal_type_gb: float = No
     # Filter to user's deals from today in this channel
     user_deals_today = []
     for idx, row in enumerate(all_records, start=2):  # start=2 because row 1 is header
-        if row.get("user_name") != user_name:
-            continue
+        # Match by user_id if available, otherwise fall back to user_name for old data
+        row_user_id = row.get("user_id")
+        row_user_name = row.get("user_name")
+        
+        if row_user_id:
+            # New data with user_id - match by user_id
+            if row_user_id != user_id:
+                continue
+        else:
+            # Old data without user_id - match by user_name
+            if row_user_name != user_name:
+                continue
+        
         if row.get("channel_name") != channel_name:
             continue
         
@@ -647,6 +677,7 @@ def remove_last_deal(user_name: str, channel_name: str, deal_type_gb: float = No
     deletion_timestamp = datetime.now(PST).isoformat()
     deletions_ws.append_row([
         deletion_timestamp,
+        deal_to_remove.get("user_id", ""),  # May be empty for old data
         deal_to_remove.get("user_name"),
         deal_to_remove.get("timestamp"),
         deal_to_remove.get("market"),
