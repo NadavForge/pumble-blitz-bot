@@ -390,13 +390,14 @@ def slack_events():
                 timestamp = datetime.now(PST).isoformat()
 
                 append_deal(
+                    user_id=user_id,
                     user_name=user_name,
                     channel_name=channel_name,
                     deals=deal_count,
                     package_size_gb=package_size_gb,
                     timestamp=timestamp
                 )
-                print(f"Logged {deal_count} deal ({package_size_gb}GB) for {user_name} in {channel_name}")
+                print(f"Logged {deal_count} deal ({package_size_gb}GB) for {user_name} ({user_id}) in {channel_name}")
                 send_message(channel_id, f"✅ Deal logged for {user_name}! ({package_size_gb}GB)")
             
         # -----------------------------
@@ -473,6 +474,7 @@ def slack_events():
             user_name = get_user_name(user_id)
             
             success, error_msg, deals_removed, gb_removed = remove_last_deal(
+                user_id=user_id,
                 user_name=user_name,
                 channel_name=channel_name,
                 deal_type_gb=deal_type_gb
@@ -483,7 +485,7 @@ def slack_events():
                     send_message(channel_id, f"✅ Removed {deals_removed} deal ({gb_removed}GB) for {user_name}")
                 else:
                     send_message(channel_id, f"✅ Removed {deals_removed} deal ({gb_removed}GB) for {user_name}")
-                print(f"Removed {deals_removed} deal ({gb_removed}GB) for {user_name} in {channel_name}")
+                print(f"Removed {deals_removed} deal ({gb_removed}GB) for {user_name} ({user_id}) in {channel_name}")
             else:
                 send_message(channel_id, error_msg)
 
