@@ -166,20 +166,34 @@ def parse_date_input(date_str: str) -> datetime:
 def parse_date_range(range_str: str) -> tuple:
     """
     Parse date range string like "12/1 to 12/15" or "november 1 to november 15"
+    Also supports single dates like "12/15" (returns same day as start and end)
     Returns (start_datetime, end_datetime) in PST
+    
+    Handles year transitions: if end month < start month, assumes year has changed
     """
     range_str = range_str.lower().strip()
     
-    # Split on " to "
+    # Check if this is a single date (no " to ")
     if " to " not in range_str:
-        raise ValueError("Date range must use format: [start date] to [end date]")
+        # Single date - use as both start and end
+        single_date = parse_date_input(range_str)
+        # Set to full day (00:00:00 to 23:59:59)
+        start_date = single_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = single_date.replace(hour=23, minute=59, second=59, microsecond=0)
+        return start_date, end_date
     
+    # Split on " to "
     parts = range_str.split(" to ")
     if len(parts) != 2:
         raise ValueError("Date range must use format: [start date] to [end date]")
     
     start_date = parse_date_input(parts[0])
     end_date = parse_date_input(parts[1])
+    
+    # Handle year transitions: if end month is earlier than start month, assume year changed
+    if end_date.month < start_date.month:
+        # Increment the year for end_date
+        end_date = end_date.replace(year=end_date.year + 1)
     
     # Set end_date to end of day (23:59:59)
     end_date = end_date.replace(hour=23, minute=59, second=59)
