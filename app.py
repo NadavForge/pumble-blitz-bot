@@ -112,9 +112,10 @@ def send_message(channel, text):
 # -----------------------------
 # Deal detection pattern
 # Matches packages: 200mb, 500mb, 1g, 2g, 5g, 8g (with variations)
+# Now supports: 0.5g, 1gps, 500mbps, etc.
 # -----------------------------
 DEAL_PATTERN = re.compile(
-    r"\b(200|500)\s*(mb|m)\b|\b([1258])\s*(g|gb|gig)s?\b", 
+    r"\b(200|500)\s*(mb|mbps|m)\b|\b([0-9]+\.?[0-9]*)\s*(g|gb|gig|gps|gbps)s?\b", 
     re.IGNORECASE
 )
 
@@ -126,7 +127,11 @@ def parse_deal_from_message(text):
     - "1g" -> (1, 1.0)
     - "2G sold!" -> (1, 2.0)
     - "200mb" -> (1, 0.2)
+    - "500mbps" -> (1, 0.5)
     - "5gig easy" -> (1, 5.0)
+    - "0.5g" -> (1, 0.5)
+    - "1gps" -> (1, 1.0)
+    - ".5gbps" -> (1, 0.5)
     
     Returns (deal_count, package_size_gb) or (0, 0) if no match
     """
@@ -143,10 +148,15 @@ def parse_deal_from_message(text):
         gb_size = mb_size / 1000  # Convert MB to GB
         return (1, gb_size)
     
-    # Otherwise it's GB (1g, 2g, 5g, 8g)
-    if match.group(3):  # GB size (1, 2, 5, or 8)
-        gb_size = int(match.group(3))
-        return (1, gb_size)
+    # Otherwise it's GB (1g, 2g, 5g, 8g, 0.5g, etc.)
+    if match.group(3):  # GB size (can be decimal like 0.5 or integer like 1, 2, 5, 8)
+        try:
+            gb_size = float(match.group(3))
+            # Validate reasonable range (0.1 to 10 GB)
+            if 0.1 <= gb_size <= 10:
+                return (1, gb_size)
+        except ValueError:
+            return (0, 0)
     
     return (0, 0)
 
@@ -173,12 +183,14 @@ def parse_leaderboard_command(text):
       leaderboard month              -> ("channel", "month", None)
       leaderboard last month         -> ("channel", "last month", None)
       leaderboard 12/1 to 12/15      -> ("channel", None, "12/1 to 12/15")
+      leaderboard 12/15              -> ("channel", None, "12/15")  # single date
       
       master leaderboard             -> ("master", "today", None)
       master leaderboard yesterday   -> ("master", "yesterday", None)
       master leaderboard last week   -> ("master", "last week", None)
       master leaderboard last month  -> ("master", "last month", None)
       master leaderboard 12/1 to 12/15 -> ("master", None, "12/1 to 12/15")
+      master leaderboard 12/15       -> ("master", None, "12/15")  # single date
     """
     lower = text.lower().strip()
     
@@ -188,6 +200,11 @@ def parse_leaderboard_command(text):
         
         # Check for date range (contains "to")
         if " to " in remainder:
+            return ("master", None, remainder)
+        
+        # Check if it looks like a date (contains / or is a month name)
+        # This handles single dates like "12/15" or "november 15"
+        if "/" in remainder or any(month in remainder for month in ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
             return ("master", None, remainder)
         
         # Check for named periods
@@ -213,6 +230,11 @@ def parse_leaderboard_command(text):
         
         # Check for date range (contains "to")
         if " to " in remainder:
+            return ("channel", None, remainder)
+        
+        # Check if it looks like a date (contains / or is a month name)
+        # This handles single dates like "12/15" or "november 15"
+        if "/" in remainder or any(month in remainder for month in ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
             return ("channel", None, remainder)
         
         # Check for named periods
@@ -348,7 +370,12 @@ def slack_events():
         # -----------------------------
         command_type, period, date_range_str = parse_leaderboard_command(text)
         
-        if command_type == "channel":
+        # Check for invalid "leaderboard" command in __leaderboard channel
+        if command_type == "channel" and channel_name.lower() == "__leaderboard":
+            error_msg = "❌ The `leaderboard` command is for individual team channels only.\n\nIn this channel, use:\n• `master leaderboard` (today's totals)\n• `master leaderboard week`\n• `master leaderboard month`\n• `master leaderboard 12/1 to 12/15`"
+            send_message(channel_id, error_msg)
+        
+        elif command_type == "channel":
             from google_sheet import get_channel_leaderboard, parse_date_range
             
             # Extract market name (everything between "blitz-" and first hyphen, if any)
