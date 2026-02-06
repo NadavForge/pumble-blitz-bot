@@ -373,26 +373,34 @@ def slack_events():
         RECENT_MESSAGES.append(message_id)
         
         # -----------------------------
-        # 1) DEAL DETECTION LOGIC
+        # 1) CHECK FOR REMOVE COMMAND FIRST
+        # (Must happen before deal detection to avoid logging when removing)
         # -----------------------------
-        deal_count, package_size_gb = parse_deal_from_message(text)
+        is_remove, deal_type_gb = parse_remove_command(text)
         
-        if deal_count > 0 and is_deal_channel and user_id:
-            user_name = get_user_name(user_id)
-            timestamp = datetime.now(PST).isoformat()
+        # -----------------------------
+        # 2) DEAL DETECTION LOGIC
+        # (Skip if this is a remove command)
+        # -----------------------------
+        if not is_remove:
+            deal_count, package_size_gb = parse_deal_from_message(text)
+            
+            if deal_count > 0 and is_deal_channel and user_id:
+                user_name = get_user_name(user_id)
+                timestamp = datetime.now(PST).isoformat()
 
-            append_deal(
-                user_name=user_name,
-                channel_name=channel_name,
-                deals=deal_count,
-                package_size_gb=package_size_gb,
-                timestamp=timestamp
-            )
-            print(f"Logged {deal_count} deal ({package_size_gb}GB) for {user_name} in {channel_name}")
-            send_message(channel_id, f"✅ Deal logged for {user_name}! ({package_size_gb}GB)")
+                append_deal(
+                    user_name=user_name,
+                    channel_name=channel_name,
+                    deals=deal_count,
+                    package_size_gb=package_size_gb,
+                    timestamp=timestamp
+                )
+                print(f"Logged {deal_count} deal ({package_size_gb}GB) for {user_name} in {channel_name}")
+                send_message(channel_id, f"✅ Deal logged for {user_name}! ({package_size_gb}GB)")
             
         # -----------------------------
-        # 2) LEADERBOARD COMMANDS
+        # 3) LEADERBOARD COMMANDS
         # -----------------------------
         command_type, period, date_range_str = parse_leaderboard_command(text)
         
@@ -456,9 +464,9 @@ def slack_events():
             send_message(channel_id, error_msg)
 
         # -----------------------------
-        # 3) REMOVE DEAL COMMAND
+        # 4) REMOVE DEAL COMMAND
+        # (Already parsed at top to prevent deal logging)
         # -----------------------------
-        is_remove, deal_type_gb = parse_remove_command(text)
         if is_remove and is_deal_channel and user_id:
             from google_sheet import remove_last_deal
             
@@ -480,7 +488,7 @@ def slack_events():
                 send_message(channel_id, error_msg)
 
         # -----------------------------
-        # 4) CACHE CLEAR COMMAND
+        # 5) CACHE CLEAR COMMAND
         # -----------------------------
         if text.lower().strip() == "!refresh cache":
             USER_CACHE.clear()
