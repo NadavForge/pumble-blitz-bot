@@ -215,8 +215,10 @@ def parse_date_range(range_str: str) -> tuple:
     start_date = parse_date_input(parts[0])
     end_date = parse_date_input(parts[1])
     
-    # Handle year transitions: if end month is earlier than start month, assume year changed
-    if end_date.month < start_date.month:
+    # Handle year transitions: if end_date is before start_date, assume year changed
+    # Note: We check the actual dates, not just months, because parse_date_input 
+    # already does smart year detection
+    if end_date < start_date:
         # Increment the year for end_date
         end_date = end_date.replace(year=end_date.year + 1)
     
