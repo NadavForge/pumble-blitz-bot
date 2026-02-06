@@ -448,6 +448,15 @@ def slack_events():
             else:
                 send_message(channel_id, error_msg)
 
+        # -----------------------------
+        # 4) CACHE CLEAR COMMAND
+        # -----------------------------
+        if text.lower().strip() == "!refresh cache":
+            USER_CACHE.clear()
+            CHANNEL_CACHE.clear()
+            send_message(channel_id, "✅ Cache cleared! Channel and user names will refresh on next use.")
+            print(f"Cache manually cleared by user in {channel_name}")
+
     return "ok", 200
 # -----------------------------
 # Debug/Test Routes
