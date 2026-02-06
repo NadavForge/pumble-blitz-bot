@@ -114,10 +114,13 @@ def parse_date_input(date_str: str) -> datetime:
     """
     Parse various date formats into datetime (PST).
     Supports:
-    - MM/DD (assumes current year)
+    - MM/DD (smart year detection - always looks backward, never forward)
     - MM/DD/YYYY
     - "november 15" or "nov 15"
     - "december 1 2024"
+    
+    If no year is provided and the date would be in the future, uses last year.
+    This ensures leaderboard queries always look at historical data.
     """
     date_str = date_str.strip().lower()
     now = datetime.now(PST)
@@ -128,7 +131,18 @@ def parse_date_input(date_str: str) -> datetime:
         try:
             month = int(parts[0])
             day = int(parts[1])
-            year = int(parts[2]) if len(parts) == 3 else now.year
+            
+            # If year provided, use it
+            if len(parts) == 3:
+                year = int(parts[2])
+            else:
+                # Smart year detection: ALWAYS look backward, never forward
+                # If date would be in future, use last year instead
+                year = now.year
+                test_date = PST.localize(datetime(year, month, day, 0, 0, 0))
+                if test_date > now:
+                    year -= 1
+            
             return PST.localize(datetime(year, month, day, 0, 0, 0))
         except (ValueError, IndexError):
             raise ValueError(f"Invalid date format: {date_str}")
@@ -156,7 +170,18 @@ def parse_date_input(date_str: str) -> datetime:
             try:
                 month = month_names[month_str]
                 day = int(parts[1])
-                year = int(parts[2]) if len(parts) >= 3 else now.year
+                
+                # If year provided, use it
+                if len(parts) >= 3:
+                    year = int(parts[2])
+                else:
+                    # Smart year detection: ALWAYS look backward, never forward
+                    # If date would be in future, use last year instead
+                    year = now.year
+                    test_date = PST.localize(datetime(year, month, day, 0, 0, 0))
+                    if test_date > now:
+                        year -= 1
+                
                 return PST.localize(datetime(year, month, day, 0, 0, 0))
             except (ValueError, IndexError):
                 pass
