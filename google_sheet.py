@@ -579,13 +579,16 @@ def _get_deletions_sheet():
         ws.append_row(["deletion_timestamp", "user_name", "original_timestamp", "market", "channel_name", "deals", "package_size_gb"])
     return ws
 
-def remove_last_deal(user_name: str, channel_name: str) -> tuple:
+def remove_last_deal(user_name: str, channel_name: str, deal_type_gb: float = None) -> tuple:
     """
     Remove the most recent deal for a user from today only.
+    Optionally filter by deal type.
     
     Args:
         user_name: Name of the user
         channel_name: Channel where deal was logged
+        deal_type_gb: Optional - specific deal size to remove (e.g., 1.0 for 1g, 0.5 for 500mb)
+                     If None, removes most recent deal of any type
     
     Returns:
         (success: bool, message: str, deals_removed: int, gb_removed: float)
@@ -614,10 +617,28 @@ def remove_last_deal(user_name: str, channel_name: str) -> tuple:
         if row_time < today_start:
             continue
         
+        # If deal_type_gb specified, filter by package size
+        if deal_type_gb is not None:
+            try:
+                row_gb = float(row.get("package_size_gb", 0))
+                # Use approximate comparison to handle floating point precision
+                if abs(row_gb - deal_type_gb) > 0.01:
+                    continue
+            except (ValueError, TypeError):
+                continue
+        
         user_deals_today.append((idx, row))
     
     if not user_deals_today:
-        return (False, "❌ No deals found to remove from today", 0, 0)
+        if deal_type_gb is not None:
+            # Format the deal type for display
+            if deal_type_gb >= 1:
+                deal_display = f"{int(deal_type_gb)}g" if deal_type_gb == int(deal_type_gb) else f"{deal_type_gb}g"
+            else:
+                deal_display = f"{int(deal_type_gb * 1000)}mb"
+            return (False, f"❌ No {deal_display} deals found to remove from today", 0, 0)
+        else:
+            return (False, "❌ No deals found to remove from today", 0, 0)
     
     # Get the most recent deal (last in the list)
     row_idx, deal_to_remove = user_deals_today[-1]
@@ -648,6 +669,8 @@ def remove_last_deal(user_name: str, channel_name: str) -> tuple:
             gb_size = float(gb_value)
         except (ValueError, TypeError):
             gb_size = 0.0
+    
+    return (True, "", deals_count, gb_size)
     
     return (True, "", deals_count, gb_size)
     
