@@ -255,7 +255,51 @@ def format_date_range_label(start_date: datetime, end_date: datetime) -> str:
         return f"{start_date.strftime('%b %d, %Y')} - {end_date.strftime('%b %d, %Y')}"
 
 # -----------------------------
-# Archive Sheet Access
+# Time Buffer Helper (5-day gap detection)
+# -----------------------------
+def filter_deals_after_gap(deals: list, gap_days: int = 5) -> list:
+    """
+    Filter deals to only include those after the most recent gap of gap_days or more.
+    
+    This helps separate sequential teams in the same channel.
+    For example, if Team A worked Jan 1-10, then there's a 6-day gap, 
+    then Team B starts Jan 17, this will return only Team B's deals.
+    
+    Args:
+        deals: List of deal rows (must have 'timestamp' field)
+        gap_days: Minimum gap in days to consider a "team separation" (default 5)
+    
+    Returns:
+        Filtered list of deals (only those after the most recent gap)
+    """
+    if not deals or len(deals) < 2:
+        return deals
+    
+    # Sort deals by timestamp
+    sorted_deals = sorted(deals, key=lambda x: parse_timestamp(x.get("timestamp", "")))
+    
+    # Find the most recent gap of gap_days or more
+    last_gap_index = -1
+    
+    for i in range(len(sorted_deals) - 1):
+        current_time = parse_timestamp(sorted_deals[i].get("timestamp", ""))
+        next_time = parse_timestamp(sorted_deals[i + 1].get("timestamp", ""))
+        
+        time_diff = next_time - current_time
+        
+        # If gap is gap_days or more, record this as a potential separation point
+        if time_diff.days >= gap_days:
+            last_gap_index = i
+    
+    # If we found a gap, return only deals after it
+    if last_gap_index >= 0:
+        return sorted_deals[last_gap_index + 1:]
+    
+    # No significant gap found, return all deals
+    return sorted_deals
+
+# -----------------------------
+# Date Range Formatting
 # -----------------------------
 def _get_archived_sheet(year: int, month: int):
     """
@@ -414,6 +458,7 @@ def get_period_label(period: str, start_date: datetime = None, end_date: datetim
 def get_channel_leaderboard(channel_name: str, period: str = "today", date_range: tuple = None) -> tuple:
     """
     Get channel leaderboard for a period or custom date range.
+    Uses time buffer (5-day gap detection) to separate sequential teams.
     Returns (leaderboard_text, period_label)
     """
     if date_range:
@@ -425,20 +470,25 @@ def get_channel_leaderboard(channel_name: str, period: str = "today", date_range
         rows = _load_deals_from_date_range(start_date, end_date)
         period_label = get_period_label(period, start_date, end_date)
     
+    # Filter to this channel only
+    channel_deals = [row for row in rows if row.get("channel_name") == channel_name]
+    
+    # Apply time buffer: only keep deals after most recent 5+ day gap
+    channel_deals = filter_deals_after_gap(channel_deals, gap_days=5)
+    
     totals = defaultdict(int)
     user_names = {}  # Map user_id to most recent user_name
     
-    for row in rows:
-        if row.get("channel_name") == channel_name:
-            user_id = row.get("user_id")
-            user_name = row.get("user_name") or "Unknown"
-            deals = int(row.get("deals") or 0)
-            
-            # If no user_id (old data), fall back to user_name as key
-            key = user_id if user_id else user_name
-            
-            totals[key] += deals
-            user_names[key] = user_name  # Keep updating to get most recent name
+    for row in channel_deals:
+        user_id = row.get("user_id")
+        user_name = row.get("user_name") or "Unknown"
+        deals = int(row.get("deals") or 0)
+        
+        # If no user_id (old data), fall back to user_name as key
+        key = user_id if user_id else user_name
+        
+        totals[key] += deals
+        user_names[key] = user_name  # Keep updating to get most recent name
 
     if not totals:
         return "", period_label
@@ -522,6 +572,61 @@ def get_master_leaderboard(period: str = "today", date_range: tuple = None) -> t
     lines.append("─────────────")
     lines.append(f"Total: {total_deals}")
 
+    return "\n".join(lines), period_label
+
+# -----------------------------
+# Team leaderboard (ranks channels/teams by deals)
+# -----------------------------
+def get_team_leaderboard(period: str = "today", date_range: tuple = None) -> tuple:
+    """
+    Get team leaderboard - ranks channels/teams by total deals.
+    Returns (leaderboard_text, period_label)
+    """
+    if date_range:
+        start_date, end_date = date_range
+        rows = _load_deals_from_date_range(start_date, end_date)
+        period_label = format_date_range_label(start_date, end_date)
+    else:
+        start_date, end_date = get_period_start_end(period)
+        rows = _load_deals_from_date_range(start_date, end_date)
+        period_label = get_period_label(period, start_date, end_date)
+    
+    # Aggregate deals by channel
+    team_totals = defaultdict(int)
+    
+    for row in rows:
+        channel_name = row.get("channel_name")
+        if not channel_name:
+            continue
+        
+        deals = int(row.get("deals") or 0)
+        team_totals[channel_name] += deals
+    
+    if not team_totals:
+        return "", period_label
+    
+    sorted_teams = sorted(team_totals.items(), key=lambda x: x[1], reverse=True)
+    
+    lines = []
+    rank = 1
+    total_deals = 0
+    
+    for channel_name, deals in sorted_teams:
+        # Extract market name for display
+        # Convert "blitz-killeen" -> "Killeen", "blitz-killeen2" -> "Killeen2"
+        if channel_name.startswith("blitz-"):
+            display_name = channel_name.replace("blitz-", "").title()
+        else:
+            display_name = channel_name.title()
+        
+        lines.append(f"{rank}. {display_name} — {deals}")
+        total_deals += deals
+        rank += 1
+    
+    # Add total count at bottom
+    lines.append("─────────────")
+    lines.append(f"Total: {total_deals}")
+    
     return "\n".join(lines), period_label
     
 # -----------------------------
