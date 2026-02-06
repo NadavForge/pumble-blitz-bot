@@ -261,19 +261,45 @@ def parse_leaderboard_command(text):
 # -----------------------------
 def parse_remove_command(text):
     """
-    Parse remove command and return True if it matches "!remove last deal"
+    Parse remove command and return deal type if specified.
     
-    Command:
-      !remove last deal          -> True
+    Commands:
+      !remove                    -> (True, None)       # Remove any deal
+      !remove last deal          -> (True, None)       # Remove any deal
+      !remove 1g                 -> (True, 1.0)        # Remove 1g deal
+      !remove 2g                 -> (True, 2.0)        # Remove 2g deal
+      !remove 500mb              -> (True, 0.5)        # Remove 500mb deal
+      !remove 0.5g               -> (True, 0.5)        # Remove 0.5g deal
+      !remove 1gps               -> (True, 1.0)        # Remove 1gps deal
     
-    Returns True or False
+    Returns (is_remove_command: bool, deal_size_gb: float or None)
     """
     lower = text.lower().strip()
     
-    if lower == "!remove last deal" or lower == "!remove":
-        return True
+    # Check if it starts with !remove
+    if not lower.startswith("!remove"):
+        return (False, None)
     
-    return False
+    # Simple !remove or !remove last deal
+    if lower == "!remove last deal" or lower == "!remove":
+        return (True, None)
+    
+    # Extract anything after !remove
+    remainder = lower.replace("!remove", "").strip()
+    
+    # Try to parse as deal type
+    deal_count, package_size_gb = parse_deal_from_message(remainder)
+    
+    if deal_count > 0:
+        # Found a valid deal type
+        return (True, package_size_gb)
+    
+    # If remainder exists but isn't a valid deal type, still treat as remove command
+    # This handles cases like "!remove something" - we'll let the removal function error
+    if remainder:
+        return (True, None)
+    
+    return (False, None)
 
 # -----------------------------
 # ROUTING
@@ -432,18 +458,23 @@ def slack_events():
         # -----------------------------
         # 3) REMOVE DEAL COMMAND
         # -----------------------------
-        if parse_remove_command(text) and is_deal_channel and user_id:
+        is_remove, deal_type_gb = parse_remove_command(text)
+        if is_remove and is_deal_channel and user_id:
             from google_sheet import remove_last_deal
             
             user_name = get_user_name(user_id)
             
             success, error_msg, deals_removed, gb_removed = remove_last_deal(
                 user_name=user_name,
-                channel_name=channel_name
+                channel_name=channel_name,
+                deal_type_gb=deal_type_gb
             )
             
             if success:
-                send_message(channel_id, f"✅ Removed {deals_removed} deal ({gb_removed}GB) for {user_name}")
+                if deal_type_gb:
+                    send_message(channel_id, f"✅ Removed {deals_removed} deal ({gb_removed}GB) for {user_name}")
+                else:
+                    send_message(channel_id, f"✅ Removed {deals_removed} deal ({gb_removed}GB) for {user_name}")
                 print(f"Removed {deals_removed} deal ({gb_removed}GB) for {user_name} in {channel_name}")
             else:
                 send_message(channel_id, error_msg)
