@@ -485,14 +485,41 @@ def get_channel_leaderboard(channel_name: str, period: str = "today", date_range
     
     totals = defaultdict(int)
     user_names = {}  # Map user_id to most recent user_name
+    name_to_id = {}  # Map user_name to user_id (for migration)
     
+    # First pass: build name_to_id mapping from rows that have user_id
+    for row in channel_deals:
+        user_id = row.get("user_id")
+        user_name = row.get("user_name") or "Unknown"
+        
+        # Clean up user_id
+        if user_id:
+            user_id = str(user_id).strip()
+        
+        # If this row has a user_id, remember it for this user_name
+        if user_id and user_name != "Unknown":
+            name_to_id[user_name] = user_id
+    
+    # Second pass: aggregate using consistent keys
     for row in channel_deals:
         user_id = row.get("user_id")
         user_name = row.get("user_name") or "Unknown"
         deals = int(row.get("deals") or 0)
         
-        # If no user_id (old data), fall back to user_name as key
-        key = user_id if user_id else user_name
+        # Clean up user_id
+        if user_id:
+            user_id = str(user_id).strip()
+        
+        # Determine key:
+        # 1. If row has user_id, use it
+        # 2. If row doesn't have user_id but we know this person's ID from other rows, use that
+        # 3. Otherwise fall back to user_name
+        if user_id:
+            key = user_id
+        elif user_name in name_to_id:
+            key = name_to_id[user_name]
+        else:
+            key = user_name
         
         totals[key] += deals
         user_names[key] = user_name  # Keep updating to get most recent name
@@ -540,17 +567,46 @@ def get_master_leaderboard(period: str = "today", date_range: tuple = None) -> t
     totals = defaultdict(int)
     user_markets = defaultdict(lambda: defaultdict(int))
     user_names = {}  # Map user_id to most recent user_name
+    name_to_id = {}  # Map user_name to user_id (for migration)
     
+    # First pass: build name_to_id mapping from rows that have user_id
+    for row in rows:
+        user_id = row.get("user_id")
+        user_name = row.get("user_name") or "Unknown"
+        
+        # Clean up user_id
+        if user_id:
+            user_id = str(user_id).strip()
+        
+        # If this row has a user_id, remember it for this user_name
+        if user_id and user_name != "Unknown":
+            name_to_id[user_name] = user_id
+    
+    # Second pass: aggregate using consistent keys
     for row in rows:
         user_id = row.get("user_id")
         user_name = row.get("user_name") or "Unknown"
         market = row.get("market") or "unknown"
         deals = int(row.get("deals") or 0)
         
-        # If no user_id (old data), fall back to user_name as key
-        key = user_id if user_id else user_name
+        # Clean up user_id
+        if user_id:
+            user_id = str(user_id).strip()
+        
+        # Determine key:
+        # 1. If row has user_id, use it
+        # 2. If row doesn't have user_id but we know this person's ID from other rows, use that
+        # 3. Otherwise fall back to user_name
+        if user_id:
+            key = user_id
+        elif user_name in name_to_id:
+            key = name_to_id[user_name]
+        else:
+            key = user_name
         
         totals[key] += deals
+        user_markets[key][market] += deals
+        user_names[key] = user_name  # Keep updating to get most recent name
         user_markets[key][market] += deals
         user_names[key] = user_name  # Keep updating to get most recent name
 
