@@ -429,6 +429,7 @@ def slack_events():
                 append_deal(
                     user_id=user_id,
                     user_name=user_name,
+                    channel_id=channel_id,
                     channel_name=channel_name,
                     deals=deal_count,
                     package_size_gb=package_size_gb,
