@@ -74,10 +74,10 @@ def extract_market(channel_name: str) -> str:
 # -----------------------------
 # Log deals
 # -----------------------------
-def append_deal(user_id: str, user_name: str, channel_name: str, deals: int, package_size_gb: float, timestamp: str):
+def append_deal(user_id: str, user_name: str, channel_id: str, channel_name: str, deals: int, package_size_gb: float, timestamp: str):
     ws = _get_sheet()
     market = extract_market(channel_name)
-    ws.append_row([timestamp, user_id, user_name, market, channel_name, deals, package_size_gb])
+    ws.append_row([timestamp, user_id, user_name, market, channel_id, channel_name, deals, package_size_gb, "FALSE"])
 
 # -----------------------------
 # Load all deal rows
